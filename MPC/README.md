@@ -1,9 +1,9 @@
 # MPC
 
 Python ROS 2 package `mpc_controller`. The vehicle model, reference preparation,
-tracking cost, and ordinary vehicle constraints are implemented independently
-of ROS. The nonlinear optimizer and command output are still under development,
-so the node receives messages but publishes no actuator commands.
+tracking cost, ordinary vehicle constraints, and warm-started nonlinear MPC are
+implemented independently of ROS. Command output is still under development,
+so the ROS node receives messages but publishes no actuator commands.
 
 | File | Work to implement |
 | --- | --- |
@@ -11,20 +11,35 @@ so the node receives messages but publishes no actuator commands.
 | `mpc_controller/reference.py` | Forward/reverse path sampling and speed reference |
 | `mpc_controller/costs.py` | Tracking, input, input-rate and terminal costs |
 | `mpc_controller/constraints.py` | Speed, steering, acceleration and steering-rate limits |
-| `mpc_controller/controller.py` | Solver setup, optimization and solve status |
+| `mpc_controller/controller.py` | CasADi/IPOPT solve, status and warm starting |
+| `mpc_controller/demo.py` | Closed-loop numerical plant and diagnostic plot |
 | `mpc_controller/ros_node.py` | ROS input conversion, control loop and command output |
 | `config/mpc.yaml` | ROS parameters (currently only the timer rate) |
 | `launch/mpc.launch.py` | Node startup and vehicle namespace |
 
-Keep the numerical control components independent of ROS so they can later be
-tested using recorded data or standalone simulations. Choose a solver and add
-its dependencies once the formulation is agreed.
+The numerical control components remain independent of ROS so they can be tested
+using recorded data or standalone simulations.
 
 The numeric Hybrid A* contract is an array with rows
 `[x_m, y_m, yaw_rad, direction]`, where direction is `+1` forward or `-1`
 reverse. `build_reference` produces `(N+1) x 4` reference states
 `[X, Y, yaw, signed_speed]`, explicitly stopping at direction changes and the
 goal. Optimizer states and controls use row-major shapes `(N+1, 4)` and `(N, 2)`.
+
+## Standalone demonstration
+
+From the repository root, install the Python dependencies and run:
+
+```bash
+python -m pip install casadi matplotlib numpy PyYAML
+PYTHONPATH=MPC python -m mpc_controller.demo
+```
+
+The demo performs a forward-to-reverse maneuver using a geometric stand-in for
+Hybrid A*, applies only the first MPC input at each step, and writes
+`MPC/results/mpc_solution.png`. The four panels show path tracking and predicted
+horizons, signed speed, steering/acceleration, and solve time. This validates the
+numerical MPC without ROS, hardware, Hybrid A*, or the low-level controller.
 
 ## Build and launch
 

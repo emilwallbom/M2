@@ -105,6 +105,7 @@ def build_reference(
     max_search_points: int = 40,
     goal_position_tolerance: float = 0.05,
     goal_speed_tolerance: float = 0.03,
+    direction_change_position_tolerance: float = 0.04,
 ) -> ReferenceTrajectory:
     """Resample a path into ``[X, Y, yaw, signed speed]`` states.
 
@@ -132,6 +133,28 @@ def build_reference(
     )
 
     direction_changes = np.flatnonzero(points[1:, 3] != points[:-1, 3]) + 1
+    horizon_limit = arc_length[-1]
+    locked_change_index = None
+    upcoming_changes = direction_changes[direction_changes > progress_index]
+    if upcoming_changes.size:
+        change_index = int(upcoming_changes[0])
+        change_progress = arc_length[change_index]
+        distance_to_change = np.linalg.norm(
+            current[[IX, IY]] - points[change_index, :2]
+        )
+        switch_ready = (
+            distance_to_change <= direction_change_position_tolerance
+            and abs(current[IV]) <= goal_speed_tolerance
+        )
+        if switch_ready:
+            progress = max(progress, change_progress)
+        else:
+            # Do not expose the next gear segment to the optimizer early. It
+            # must first reach and stop at the current segment's terminal pose.
+            progress = min(progress, change_progress)
+            horizon_limit = change_progress
+            locked_change_index = change_index
+
     stop_positions = np.append(arc_length[direction_changes], arc_length[-1])
     yaw_gradient = np.gradient(points[:, 2], arc_length)
     nominal_step = target_speed * dt
@@ -152,7 +175,9 @@ def build_reference(
 
         if step_index == horizon or sample_progress >= arc_length[-1]:
             continue
-        next_progress = min(sample_progress + nominal_step, arc_length[-1])
+        next_progress = min(
+            sample_progress + nominal_step, arc_length[-1], horizon_limit
+        )
         crossed_stops = stop_positions[
             (stop_positions > sample_progress + 1e-9)
             & (stop_positions < next_progress - 1e-9)
@@ -161,13 +186,16 @@ def build_reference(
             next_progress = crossed_stops[0]
         sample_progress = next_progress
 
-    new_progress_index = int(
-        np.clip(
-            np.searchsorted(arc_length, progress, side="right") - 1,
-            0,
-            len(points) - 2,
+    if locked_change_index is not None and progress >= horizon_limit - 1e-9:
+        new_progress_index = locked_change_index - 1
+    else:
+        new_progress_index = int(
+            np.clip(
+                np.searchsorted(arc_length, progress, side="right") - 1,
+                0,
+                len(points) - 2,
+            )
         )
-    )
     goal_distance = np.linalg.norm(current[[IX, IY]] - points[-1, :2])
     goal_reached = (
         goal_distance <= goal_position_tolerance

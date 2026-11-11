@@ -1,4 +1,10 @@
 /**:
   ros__parameters:
-    # Node timer rate; prediction step and horizon will be defined with the model.
-    control_rate_hz: 20.0
+    # Baseline values used by the numerical MPC. ROS parameter wiring is the
+    # next integration step; keep these synchronized with MPCConfig defaults.
+    control_rate_hz: 10.0
+    prediction_dt_sec: 0.1
+    horizon_steps: 30
+    target_speed_mps: 0.35
+    solver_max_iterations: 100
+    solver_max_cpu_time_sec: 0.08

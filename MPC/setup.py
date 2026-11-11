@@ -13,13 +13,16 @@ setup(
         ("share/mpc_controller/launch", glob("launch/*.launch.py")),
         ("share/mpc_controller/config", glob("config/*.yaml")),
     ],
-    install_requires=["setuptools", "numpy", "PyYAML"],
+    install_requires=["setuptools", "casadi", "matplotlib", "numpy", "PyYAML"],
     zip_safe=True,
     maintainer="emilwallbom",
     maintainer_email="emil.wallbom02@gmail.com",
     description="MPC development scaffold for the motion planning project.",
     license="TODO",
     entry_points={
-        "console_scripts": ["mpc_node = mpc_controller.ros_node:main"],
+        "console_scripts": [
+            "mpc_node = mpc_controller.ros_node:main",
+            "mpc_demo = mpc_controller.demo:main",
+        ],
     },
 )

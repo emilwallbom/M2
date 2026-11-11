@@ -27,9 +27,19 @@ def test_reference_stops_before_direction_change():
     )
 
     stop = np.flatnonzero(np.isclose(result.states[:, 0], 2.0))
-    assert stop.size == 1
-    assert result.states[stop[0], 3] == 0.0
-    assert np.any(result.states[stop[0] + 1 :, 3] < 0.0)
+    assert stop.size > 0
+    assert np.all(result.states[stop, 3] == 0.0)
+    assert not np.any(result.states[:, 3] < 0.0)
+
+    switched = build_reference(
+        np.array([2.0, 0.0, 0.0, 0.0]),
+        path,
+        horizon=4,
+        dt=1.0,
+        progress_index=1,
+        target_speed=0.5,
+    )
+    assert np.any(switched.states[1:, 3] < 0.0)
 
 
 def test_goal_reached_uses_position_and_speed():

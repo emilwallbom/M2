@@ -138,3 +138,29 @@ topics share the `/panther` namespace. Useful checks in another terminal are:
 ros2 topic echo /panther/optimized_trajectory --once
 ros2 topic echo /panther/actuator_command
 ```
+
+## Physical parking mission
+
+With the Raspberry Pi hardware drivers running and visible on the same ROS
+domain, the Linux project PC can start its complete side of the stack with:
+
+```bash
+ros2 launch mpc_controller hardware_parking.launch.py agent_name:=tiger
+```
+
+The launcher starts vehicle state estimation with Qualisys, RViz, Hybrid A*/
+OBCA, the low-level controller, and a one-shot mission. It waits for odometry,
+the planner subscription, a stationary vehicle, and an eight-second startup
+delay. The default target is expressed in the vehicle's starting frame: 0.8 m
+behind, 0.4 m left, with the same final heading. Hardware throttle effort is
+limited to 0.2 by default.
+
+Mission geometry and the effort limit can be changed at launch:
+
+```bash
+ros2 launch mpc_controller hardware_parking.launch.py \
+  agent_name:=tiger forward_m:=-0.6 left_m:=0.35 \
+  yaw_delta_rad:=0.0 max_throttle_output:=0.15
+```
+
+Use `qualisys_used:=false` only when running without the Qualisys system.

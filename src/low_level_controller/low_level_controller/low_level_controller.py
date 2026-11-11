@@ -23,6 +23,7 @@ class LowLevelController(Node):
         self.odom: Odometry | None = None
         self.velocity: float | None = None
         self.declare_parameter("speed_log_directory", "speed_logs")
+        self.declare_parameter("max_throttle_output", 1.0)
         self.speed_log_path = (
             Path(self.get_parameter("speed_log_directory").value).expanduser()
             / f"odom_speed_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.csv"
@@ -67,6 +68,10 @@ class LowLevelController(Node):
         self.max_left_steering_angle: float = math.radians(25.0)
         self.max_right_steering_angle: float = math.radians(35.0)
         self.steering_offset: float = math.radians(5.0)
+        self.max_throttle_output = max(
+            0.0,
+            min(1.0, float(self.get_parameter("max_throttle_output").value)),
+        )
 
     def control_callback(self) -> None:
         """Control the vehicle based on the current state."""
@@ -86,10 +91,10 @@ class LowLevelController(Node):
         error: float = self.reference_velocity - self.velocity
         delta_u = self.k * (error - self.previous_error + self.dt / self.ti * error)
 
-        if self.previous_u + delta_u > 1.0:
-            u = 1.0
-        elif self.previous_u + delta_u < -1.0:
-            u = -1.0
+        if self.previous_u + delta_u > self.max_throttle_output:
+            u = self.max_throttle_output
+        elif self.previous_u + delta_u < -self.max_throttle_output:
+            u = -self.max_throttle_output
         else:
             u = self.previous_u + delta_u
 

@@ -10,7 +10,7 @@ type = "vehicle"
 
 [qualisys]
 # Should be set to true if using Qualisys motion capture in Visionen.
-use = false
+use = true
 
 [rviz]
 # Whether to start rviz2 with the project launch file.

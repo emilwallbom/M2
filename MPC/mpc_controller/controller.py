@@ -52,8 +52,21 @@ class OptimizerConfig:
     #   "legacy":             the original heuristic (_legacy_dual_initial_guess).
     # Only the initial values change; the optimization problem is the same.
     dual_init: str = "optimal_separation"
+    # (x_min, x_max, y_min, y_max): keeps all four corners of the vehicle
+    # footprint inside this box at every step. None = unbounded (the previous
+    # behaviour). Hybrid A* is confined to the map, so use the same box here.
+    map_bounds: tuple[float, float, float, float] | None = None
 
     def __post_init__(self):
+        if self.map_bounds is not None:
+            bounds = tuple(float(v) for v in self.map_bounds)
+            if (
+                len(bounds) != 4
+                or not np.all(np.isfinite(bounds))
+                or not (bounds[0] < bounds[1] and bounds[2] < bounds[3])
+            ):
+                raise ValueError("map_bounds must be (x_min, x_max, y_min, y_max)")
+            object.__setattr__(self, "map_bounds", bounds)
         if self.dual_init not in DUAL_INIT_METHODS:
             raise ValueError(
                 f"dual_init must be one of {DUAL_INIT_METHODS}, got {self.dual_init!r}"
@@ -248,6 +261,25 @@ class TrajectoryOptimizer:
 
         G_array, g_array = footprint_halfspaces(self.params)
         G, g = ca.DM(G_array), ca.DM(g_array)
+        if self.config.map_bounds is not None:
+            # Footprint corners in the world frame are t + R c for the four
+            # corners c = (+-half_length, +-half_width); keeping every corner
+            # inside the box keeps the whole (convex) car inside it.
+            x_min, x_max, y_min, y_max = self.config.map_bounds
+            corners = [
+                ca.DM([sx * g_array[0], sy * g_array[2]])
+                for sx in (1.0, -1.0)
+                for sy in (1.0, -1.0)
+            ]
+            lower = ca.DM([x_min, y_min] * len(corners))
+            upper = ca.DM([x_max, y_max] * len(corners))
+            for index in range(horizon + 1):
+                state = states[index, :].T
+                centre = translation(state, self.params, xp=ca)
+                rotated = rotation(state, xp=ca)
+                world = ca.vertcat(*[centre + rotated @ corner for corner in corners])
+                opti.subject_to(opti.bounded(lower, world, upper))
+
         obstacle_lambdas = []
         vehicle_mus = []
         for obstacle in self.obstacles:

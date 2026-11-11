@@ -1,4 +1,4 @@
-"""Standalone closed-loop MPC demonstration with diagnostic plots."""
+"""Standalone visualization of the paper's OBCA trajectory optimization."""
 
 from __future__ import annotations
 
@@ -8,226 +8,165 @@ from pathlib import Path
 
 import numpy as np
 
-from .controller import MPCConfig, MPCController
-from .model import IA, IDELTA, IV, VehicleParams, step
-from .reference import build_reference
+from .controller import OptimizerConfig, TrajectoryOptimizer, TrajectoryResult
+from .model import IA, IDELTA, IV, VehicleParams
+from .obstacles import (
+    ConvexPolytope,
+    axis_aligned_rectangle,
+    polytope_vertices,
+    trajectory_clearance,
+    vehicle_vertices,
+)
+from .reference import TrajectoryGuess, build_initial_guess
 
 
 @dataclass(frozen=True)
 class DemoResult:
-    path: np.ndarray
-    states: np.ndarray
-    controls: np.ndarray
-    reference_speeds: np.ndarray
-    solve_times: np.ndarray
-    predicted_states: tuple[np.ndarray, ...]
-    goal_reached: bool
-    dt: float
+    warm_start: TrajectoryGuess
+    optimized: TrajectoryResult
+    obstacles: tuple[ConvexPolytope, ...]
+    clearances: np.ndarray
+    required_clearance: float
+    params: VehicleParams
 
 
-def make_parking_path(spacing: float = 0.04) -> np.ndarray:
-    """Create a feasible forward-then-reverse path without Hybrid A*."""
-    forward_x = np.arange(0.0, 1.0, spacing)
-    forward = np.column_stack(
-        (
-            forward_x,
-            np.zeros_like(forward_x),
-            np.zeros_like(forward_x),
-            np.ones_like(forward_x),
-        )
+def make_hybrid_astar_standin(samples: int = 41) -> np.ndarray:
+    """Create a coarse collision-free path without implementing Hybrid A*."""
+    x = np.linspace(0.0, 3.0, samples)
+    height = 0.48
+    y = height * np.sin(np.pi * x / 3.0) ** 2
+    dydx = height * (np.pi / 3.0) * np.sin(2.0 * np.pi * x / 3.0)
+    yaw = np.arctan2(dydx, np.ones_like(dydx))
+    return np.column_stack((x, y, yaw, np.ones_like(x)))
+
+
+def make_demo_obstacles() -> tuple[ConvexPolytope, ...]:
+    return (
+        axis_aligned_rectangle(
+            1.5, 0.0, width=0.38, height=0.30, label="parked object"
+        ),
     )
 
-    reverse_distance = np.arange(0.0, 0.84, spacing)
-    radius = 1.0
-    reverse = np.column_stack(
-        (
-            1.0 - radius * np.sin(reverse_distance / radius),
-            radius * (1.0 - np.cos(reverse_distance / radius)),
-            -reverse_distance / radius,
-            -np.ones_like(reverse_distance),
-        )
-    )
-    return np.vstack((forward, reverse))
 
-
-def run_closed_loop(
+def run_optimization(
     *,
-    config: MPCConfig | None = None,
+    config: OptimizerConfig | None = None,
     params: VehicleParams | None = None,
-    max_steps: int = 160,
-    target_speed: float = 0.35,
 ) -> DemoResult:
-    """Run MPC against a numerical plant, applying only the first input."""
-    config = config or MPCConfig()
+    """Solve once: the A* stand-in is used only as the IPOPT initial value."""
+    config = config or OptimizerConfig()
     params = params or VehicleParams()
-    path = make_parking_path()
-    controller = MPCController(config, params)
-    state = np.array([path[0, 0], path[0, 1], path[0, 2], 0.0])
-    previous_control = np.zeros(2)
-    progress_index = 0
-
-    states = [state.copy()]
-    controls = []
-    reference_speeds = []
-    solve_times = []
-    predicted_states = []
-    goal_reached = False
-
-    for iteration in range(max_steps):
-        reference = build_reference(
-            state,
-            path,
-            config.horizon,
-            config.dt,
-            progress_index=progress_index,
-            target_speed=target_speed,
-        )
-        progress_index = reference.progress_index
-        if reference.goal_reached:
-            goal_reached = True
-            break
-
-        result = controller.solve(state, reference, previous_control)
-        if not result.success:
-            raise RuntimeError(
-                f"MPC failed at closed-loop step {iteration}: {result.status}"
-            )
-        control = result.control
-        if iteration % 10 == 0:
-            predicted_states.append(result.states.copy())
-        reference_speeds.append(reference.states[0, IV])
-        solve_times.append(result.solve_time)
-        controls.append(control.copy())
-        state = np.asarray(step(state, control, config.dt, params), dtype=float)
-        states.append(state.copy())
-        previous_control = control
-
+    path = make_hybrid_astar_standin()
+    warm_start = build_initial_guess(path, sample_time=0.15, params=params)
+    obstacles = make_demo_obstacles()
+    optimizer = TrajectoryOptimizer(config, params, obstacles=obstacles)
+    start = warm_start.states[0].copy()
+    goal = warm_start.states[-1].copy()
+    result = optimizer.solve(start, goal, warm_start)
+    if not result.success:
+        raise RuntimeError(f"trajectory optimization failed: {result.status}")
     return DemoResult(
-        path,
-        np.asarray(states),
-        np.asarray(controls),
-        np.asarray(reference_speeds),
-        np.asarray(solve_times),
-        tuple(predicted_states),
-        goal_reached,
-        config.dt,
+        warm_start,
+        result,
+        obstacles,
+        trajectory_clearance(result.states, obstacles, params),
+        config.minimum_clearance,
+        params,
     )
+
+
+def _draw_environment(axis, result: DemoResult):
+    for index, obstacle in enumerate(result.obstacles):
+        vertices = polytope_vertices(obstacle)
+        closed = np.vstack((vertices, vertices[0]))
+        axis.fill(
+            closed[:, 0], closed[:, 1], color="tab:red", alpha=0.35,
+            label="Obstacle" if index == 0 else None,
+        )
+    indices = np.linspace(0, len(result.optimized.states) - 1, 11, dtype=int)
+    for footprint_index, state_index in enumerate(np.unique(indices)):
+        vertices = vehicle_vertices(result.optimized.states[state_index], result.params)
+        closed = np.vstack((vertices, vertices[0]))
+        axis.plot(
+            closed[:, 0], closed[:, 1], color="tab:blue", alpha=0.32,
+            label="Optimized vehicle footprints" if footprint_index == 0 else None,
+        )
 
 
 def plot_result(result: DemoResult, output: Path, *, show: bool = False):
-    """Save a four-panel plot intended for controller review and tuning."""
+    """Plot the initial guess beside the independently optimized trajectory."""
     if not show:
         import matplotlib
-
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    state_time = np.arange(len(result.states)) * result.dt
-    control_time = np.arange(len(result.controls)) * result.dt
-    final_error = np.linalg.norm(result.states[-1, :2] - result.path[-1, :2])
+    optimized = result.optimized
+    state_time = np.arange(len(optimized.states)) * optimized.sample_time
+    control_time = np.arange(len(optimized.controls)) * optimized.sample_time
 
-    figure, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
-    path_axis, speed_axis, input_axis, timing_axis = axes.flat
+    figure = plt.figure(figsize=(15, 8), constrained_layout=True)
+    grid = figure.add_gridspec(2, 3)
+    path_axis = figure.add_subplot(grid[0, :2])
+    clearance_axis = figure.add_subplot(grid[0, 2])
+    speed_axis = figure.add_subplot(grid[1, 0])
+    input_axis = figure.add_subplot(grid[1, 1])
+    cost_axis = figure.add_subplot(grid[1, 2])
 
+    _draw_environment(path_axis, result)
     path_axis.plot(
-        result.path[:, 0],
-        result.path[:, 1],
-        "k--",
-        label="Hybrid A* stand-in",
+        result.warm_start.states[:, 0], result.warm_start.states[:, 1],
+        "k--", linewidth=1.5, label="Hybrid A* warm start",
     )
-    for index, prediction in enumerate(result.predicted_states):
-        path_axis.plot(
-            prediction[:, 0],
-            prediction[:, 1],
-            color="tab:cyan",
-            alpha=0.25,
-            label="MPC predictions" if index == 0 else None,
-        )
     path_axis.plot(
-        result.states[:, 0],
-        result.states[:, 1],
-        color="tab:blue",
-        linewidth=2,
-        label="Actual",
+        optimized.states[:, 0], optimized.states[:, 1],
+        color="tab:blue", linewidth=2.5, label="OBCA optimized trajectory",
     )
-    path_axis.scatter(
-        *result.path[0, :2], color="tab:green", s=70, marker="o", label="Start"
-    )
-    path_axis.scatter(
-        *result.path[-1, :2], color="tab:red", s=80, marker="x", label="Goal"
-    )
-    changes = np.flatnonzero(result.path[1:, 3] != result.path[:-1, 3]) + 1
-    if changes.size:
-        path_axis.scatter(
-            result.path[changes, 0],
-            result.path[changes, 1],
-            color="tab:orange",
-            s=70,
-            marker="D",
-            label="Direction change",
-        )
-    path_axis.set_title("Path and receding-horizon predictions")
+    path_axis.scatter(*optimized.states[0, :2], color="tab:green", s=60, label="Fixed start")
+    path_axis.scatter(*optimized.states[-1, :2], color="tab:red", marker="x", s=70, label="Fixed goal")
+    path_axis.set_title("A* initializes IPOPT; it is not a tracking reference")
     path_axis.set_xlabel("X [m]")
     path_axis.set_ylabel("Y [m]")
     path_axis.axis("equal")
     path_axis.grid(True, alpha=0.3)
-    path_axis.legend(fontsize=8)
+    path_axis.legend(fontsize=8, ncol=2)
 
-    speed_axis.plot(state_time, result.states[:, IV], label="Actual speed")
-    speed_axis.step(
-        control_time,
-        result.reference_speeds,
-        where="post",
-        linestyle="--",
-        label="Local reference speed",
-    )
-    speed_axis.axhline(0.0, color="black", linewidth=0.8)
-    speed_axis.set_title("Forward/reverse speed")
+    clearance_axis.plot(state_time, result.clearances, color="tab:green")
+    clearance_axis.axhline(result.required_clearance, color="tab:red", linestyle="--", label="Required")
+    clearance_axis.set_title("Independent body clearance")
+    clearance_axis.set_xlabel("Time [s]")
+    clearance_axis.set_ylabel("Distance [m]")
+    clearance_axis.grid(True, alpha=0.3)
+    clearance_axis.legend()
+
+    speed_axis.plot(state_time, optimized.states[:, IV], color="tab:blue")
+    speed_axis.set_title("Optimized velocity profile")
     speed_axis.set_xlabel("Time [s]")
-    speed_axis.set_ylabel("Speed [m/s]")
+    speed_axis.set_ylabel("v [m/s]")
     speed_axis.grid(True, alpha=0.3)
-    speed_axis.legend()
 
-    input_axis.step(
-        control_time,
-        np.rad2deg(result.controls[:, IDELTA]),
-        where="post",
-        label="Steering [deg]",
-    )
-    input_axis.step(
-        control_time,
-        result.controls[:, IA],
-        where="post",
-        label="Acceleration [m/s²]",
-    )
-    input_axis.set_title("Applied MPC inputs")
+    input_axis.step(control_time, np.rad2deg(optimized.controls[:, IDELTA]), where="post", label="Steering [deg]")
+    input_axis.step(control_time, optimized.controls[:, IA], where="post", label="Acceleration [m/s²]")
+    input_axis.set_title("Optimized inputs")
     input_axis.set_xlabel("Time [s]")
     input_axis.grid(True, alpha=0.3)
     input_axis.legend()
 
-    timing_axis.plot(
-        control_time, 1000.0 * result.solve_times, color="tab:purple"
-    )
-    timing_axis.axhline(
-        1000.0 * result.dt,
-        color="tab:red",
-        linestyle="--",
-        label=f"{1000.0 * result.dt:.0f} ms control period",
-    )
-    timing_axis.set_title("Nonlinear solver time")
-    timing_axis.set_xlabel("Time [s]")
-    timing_axis.set_ylabel("Solve time [ms]")
-    timing_axis.grid(True, alpha=0.3)
-    timing_axis.legend()
+    labels = ["time", "input", "input rate"]
+    values = [optimized.time_cost, optimized.input_cost, optimized.input_rate_cost]
+    cost_axis.bar(labels, values, color=["tab:purple", "tab:orange", "tab:cyan"])
+    cost_axis.set_title("Equation (20) objective terms")
+    cost_axis.set_ylabel("Weighted cost")
+    cost_axis.grid(True, axis="y", alpha=0.3)
 
-    mean_ms = 1000.0 * np.mean(result.solve_times)
-    max_ms = 1000.0 * np.max(result.solve_times)
+    displacement = np.max(np.linalg.norm(
+        optimized.states[:, :2] - result.warm_start.states[:, :2], axis=1
+    ))
     figure.suptitle(
-        f"CasCAR MPC demo | goal={result.goal_reached} | "
-        f"final error={final_error:.3f} m | "
-        f"solve mean/max={mean_ms:.1f}/{max_ms:.1f} ms"
+        f"OBCA trajectory optimization | Topt={optimized.sample_time:.3f} s | "
+        f"duration={optimized.total_time:.2f} s | max change from warm start={displacement:.3f} m | "
+        f"solve={optimized.solve_time:.2f} s"
     )
     figure.savefig(output, dpi=160)
     if show:
@@ -237,26 +176,20 @@ def plot_result(result: DemoResult, output: Path, *, show: bool = False):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("MPC/results/mpc_solution.png"),
-        help="PNG output path",
-    )
-    parser.add_argument("--show", action="store_true", help="open the plot window")
+    parser.add_argument("--output", type=Path, default=Path("MPC/results/mpc_solution.png"))
+    parser.add_argument("--show", action="store_true")
     parsed = parser.parse_args(args)
-    result = run_closed_loop()
+    result = run_optimization()
     plot_result(result, parsed.output, show=parsed.show)
-    final_error = np.linalg.norm(result.states[-1, :2] - result.path[-1, :2])
+    displacement = np.max(np.linalg.norm(
+        result.optimized.states[:, :2] - result.warm_start.states[:, :2], axis=1
+    ))
     print(f"plot: {parsed.output.resolve()}")
-    print(f"goal reached: {result.goal_reached}")
-    print(f"closed-loop steps: {len(result.controls)}")
-    print(f"final position error: {final_error:.4f} m")
-    print(
-        "solver mean/max: "
-        f"{1000.0 * np.mean(result.solve_times):.2f}/"
-        f"{1000.0 * np.max(result.solve_times):.2f} ms"
-    )
+    print(f"solver: {result.optimized.status} in {result.optimized.solve_time:.3f} s")
+    print(f"Topt / total time: {result.optimized.sample_time:.4f} / {result.optimized.total_time:.3f} s")
+    print(f"maximum change from A* warm start: {displacement:.4f} m")
+    print(f"minimum body clearance: {np.min(result.clearances):.4f} m")
+    print(f"objective: {result.optimized.objective:.4f}")
 
 
 if __name__ == "__main__":

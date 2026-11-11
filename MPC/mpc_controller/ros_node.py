@@ -32,8 +32,8 @@ class MPCNode(Node):
         )
         self.control_timer = self.create_timer(1.0 / control_rate, self._control_tick)
         self.get_logger().info(
-            "MPC scaffold started. Optimization is not implemented; "
-            "no actuator commands will be published."
+            "OBCA optimizer interface started; ROS trajectory publication is "
+            "not wired yet, so no actuator commands will be published."
         )
 
     def _on_odometry(self, message: Odometry):
@@ -47,10 +47,9 @@ class MPCNode(Node):
             return
         # TODO: validate timestamps, frames, finite values and nonempty paths.
         # TODO: convert ROS messages into model state and numeric path data.
-        # TODO: build the horizon reference and call self.controller.solve().
-        # TODO: handle failed/stale solutions and define stopping behavior.
-        # TODO: map physical inputs to normalized throttle/steering in [-1, 1],
-        # stamp an ActuatorCommand and publish only after validation.
+        # TODO: convert the Hybrid A* path to a TrajectoryGuess and supply
+        # obstacle polytopes, fixed start, and fixed goal to solve().
+        # TODO: publish the full optimized trajectory for the low-level group.
         # The scaffold must not produce placeholder driving commands.
 
 

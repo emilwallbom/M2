@@ -1,10 +1,14 @@
 /**:
   ros__parameters:
-    # Baseline values used by the numerical MPC. ROS parameter wiring is the
-    # next integration step; keep these synchronized with MPCConfig defaults.
-    control_rate_hz: 10.0
-    prediction_dt_sec: 0.1
-    horizon_steps: 30
-    target_speed_mps: 0.35
-    solver_max_iterations: 100
-    solver_max_cpu_time_sec: 0.08
+    # Values for the one-shot OBCA trajectory optimizer. Parameter wiring into
+    # ros_node.py remains integration work.
+    minimum_sample_time_sec: 0.05
+    maximum_sample_time_sec: 0.35
+    minimum_clearance_m: 0.05
+    objective_time_weight: 1.0
+    objective_steering_weight: 0.01
+    objective_acceleration_weight: 0.5
+    objective_steering_rate_weight: 0.1
+    objective_acceleration_rate_weight: 0.1
+    solver_max_iterations: 500
+    solver_max_cpu_time_sec: 10.0

@@ -1,48 +1,57 @@
 import numpy as np
 
 from mpc_controller.constraints import build_constraints
-from mpc_controller.controller import MPCConfig, MPCController
+from mpc_controller.controller import OptimizerConfig, TrajectoryOptimizer
+from mpc_controller.costs import trajectory_objective
 from mpc_controller.model import step
+from mpc_controller.reference import build_initial_guess
 
 
-def test_controller_solves_and_respects_dynamics_and_limits():
-    config = MPCConfig(horizon=8, dt=0.1, solver_max_cpu_time=1.0)
-    controller = MPCController(config)
-    state = np.zeros(4)
-    reference = np.zeros((config.horizon + 1, 4))
-    reference[:, 0] = np.arange(config.horizon + 1) * 0.03
-    reference[:, 3] = 0.3
+def test_optimizer_fixes_endpoints_and_respects_dynamics_and_limits():
+    x = np.linspace(0.0, 0.8, 17)
+    path = np.column_stack((x, np.zeros_like(x), np.zeros_like(x)))
+    guess = build_initial_guess(path, sample_time=0.15)
+    start = guess.states[0].copy()
+    goal = guess.states[-1].copy()
+    optimizer = TrajectoryOptimizer(
+        OptimizerConfig(solver_max_cpu_time=2.0, solver_max_iterations=300)
+    )
 
-    result = controller.solve(state, reference, np.zeros(2))
+    result = optimizer.solve(start, goal, guess)
 
     assert result.success, result.status
-    assert result.states.shape == (config.horizon + 1, 4)
-    assert result.controls.shape == (config.horizon, 2)
-    for index in range(config.horizon):
+    np.testing.assert_allclose(result.states[0], start, atol=1e-7)
+    np.testing.assert_allclose(result.states[-1], goal, atol=1e-7)
+    for index in range(guess.horizon):
         predicted = step(
-            result.states[index], result.controls[index], config.dt, controller.params
+            result.states[index], result.controls[index], result.sample_time,
+            optimizer.params,
         )
         np.testing.assert_allclose(result.states[index + 1], predicted, atol=1e-6)
-    constraint_set = build_constraints(
-        result.states,
-        result.controls,
-        np.zeros(2),
-        config.dt,
-        controller.params,
+    constraints = build_constraints(
+        result.states, result.controls, np.zeros(2), result.sample_time,
+        optimizer.params,
     )
-    assert constraint_set.is_satisfied(1e-6)
+    assert constraints.is_satisfied(1e-6)
+    assert np.isclose(
+        result.objective,
+        trajectory_objective(
+            result.controls, result.sample_time, weights=optimizer.weights
+        ),
+        atol=1e-6,
+    )
 
 
-def test_second_solve_uses_valid_shifted_warm_start():
-    config = MPCConfig(horizon=6, dt=0.1, solver_max_cpu_time=1.0)
-    controller = MPCController(config)
-    reference = np.zeros((config.horizon + 1, 4))
-    reference[:, 0] = np.arange(config.horizon + 1) * 0.02
-    reference[:, 3] = 0.2
-    first = controller.solve(np.zeros(4), reference, np.zeros(2))
-    assert first.success, first.status
-
-    next_state = step(np.zeros(4), first.control, config.dt, controller.params)
-    second = controller.solve(next_state, reference, first.control)
-    assert second.success, second.status
-    np.testing.assert_allclose(second.states[0], next_state, atol=1e-7)
+def test_warm_start_is_not_a_tracked_reference():
+    x = np.linspace(0.0, 0.8, 17)
+    y = 0.12 * np.sin(np.pi * x / x[-1])
+    yaw = np.arctan2(np.gradient(y, x), np.ones_like(x))
+    guess = build_initial_guess(np.column_stack((x, y, yaw)), sample_time=0.15)
+    result = TrajectoryOptimizer().solve(
+        np.array([0.0, 0.0, yaw[0], 0.0]),
+        np.array([0.8, 0.0, yaw[-1], 0.0]),
+        guess,
+    )
+    assert result.success, result.status
+    change = np.max(np.linalg.norm(result.states[:, :2] - guess.states[:, :2], axis=1))
+    assert change > 0.02

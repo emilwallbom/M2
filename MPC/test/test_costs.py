@@ -1,26 +1,31 @@
 import numpy as np
 
-from mpc_controller.costs import angle_error, tracking_cost
+from mpc_controller.costs import ObjectiveWeights, trajectory_objective
 
 
-def test_matching_zero_trajectory_has_zero_cost():
-    states = np.zeros((4, 4))
-    controls = np.zeros((3, 2))
-    assert tracking_cost(states, controls, states, np.zeros(2), dt=0.1) == 0.0
-
-
-def test_angle_error_wraps_at_pi():
-    error = angle_error(-np.pi + 0.1, np.pi - 0.1)
-    assert np.isclose(error, 0.2)
-
-
-def test_terminal_error_is_penalized_more_than_stage_error():
-    reference = np.zeros((3, 4))
-    controls = np.zeros((2, 2))
-    stage_error = reference.copy()
-    terminal_error = reference.copy()
-    stage_error[0, 0] = 1.0
-    terminal_error[-1, 0] = 1.0
-    assert tracking_cost(terminal_error, controls, reference) > tracking_cost(
-        stage_error, controls, reference
+def test_equation_20_cost_components():
+    controls = np.array([[0.1, 0.2], [0.2, 0.0]])
+    weights = ObjectiveWeights(
+        time=2.0,
+        steering=3.0,
+        acceleration=4.0,
+        steering_rate=5.0,
+        acceleration_rate=6.0,
     )
+    T = 0.5
+    rates = np.diff(np.vstack((np.zeros(2), controls)), axis=0) / T
+    expected = (
+        weights.time * len(controls) * T
+        + np.sum(weights.steering * controls[:, 0] ** 2)
+        + np.sum(weights.acceleration * controls[:, 1] ** 2)
+        + np.sum(weights.steering_rate * rates[:, 0] ** 2)
+        + np.sum(weights.acceleration_rate * rates[:, 1] ** 2)
+    )
+    assert np.isclose(
+        trajectory_objective(controls, T, weights=weights), expected
+    )
+
+
+def test_zero_inputs_still_pay_maneuver_time():
+    controls = np.zeros((4, 2))
+    assert np.isclose(trajectory_objective(controls, 0.2), 0.8)

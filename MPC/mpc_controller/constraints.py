@@ -1,4 +1,4 @@
-"""Ordinary state and input constraints for the MPC solver.
+"""Ordinary state and input constraints for the trajectory optimizer.
 
 OBCA environment constraints are separate; these limits apply with no obstacles.
 """
@@ -39,17 +39,16 @@ def build_constraints(
     states,
     controls,
     previous_control,
-    dt: float,
+    dt,
     params: VehicleParams | None = None,
     *,
     xp=np,
 ) -> ConstraintSet:
     """Build speed, steering, acceleration, and steering-rate constraints."""
     params = params or VehicleParams()
-    if not np.isfinite(dt) or dt <= 0.0:
-        raise ValueError("dt must be finite and positive")
-
     if xp is np:
+        if not np.isfinite(dt) or dt <= 0.0:
+            raise ValueError("dt must be finite and positive")
         states = np.asarray(states, dtype=float)
         controls = np.asarray(controls, dtype=float)
         previous_control = np.asarray(previous_control, dtype=float)

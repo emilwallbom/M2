@@ -1,8 +1,8 @@
-"""Prepare a finite-horizon reference from a geometric parking path.
+"""Convert a Hybrid A* path into an NLP initial guess.
 
-The Hybrid A* interface is an ``N x 4`` array whose rows are
-``[x_m, y_m, yaw_rad, direction]``. Direction is ``+1`` for forward and
-``-1`` for reverse. A three-column path is accepted as forward-only.
+This module does no reference tracking. Its output is used only with
+``Opti.set_initial`` and therefore does not constrain or penalize the final
+optimized trajectory.
 """
 
 from __future__ import annotations
@@ -11,194 +11,89 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .model import IPHI, IV, IX, IY, NX
+from .model import IA, IDELTA, IPHI, IV, NU, NX, VehicleParams
 
 
 @dataclass(frozen=True)
-class ReferenceTrajectory:
-    """Reference states plus path progress for the next MPC cycle."""
+class TrajectoryGuess:
+    """Initial state/input values supplied to the nonlinear optimizer."""
 
     states: np.ndarray
-    progress_index: int
-    goal_reached: bool
+    controls: np.ndarray
+    sample_time: float
+
+    def __post_init__(self):
+        states = np.asarray(self.states, dtype=float)
+        controls = np.asarray(self.controls, dtype=float)
+        if states.ndim != 2 or states.shape[1] != NX or len(states) < 2:
+            raise ValueError(f"states must have shape (N+1, {NX})")
+        if controls.shape != (len(states) - 1, NU):
+            raise ValueError(f"controls must have shape (N, {NU})")
+        if not np.all(np.isfinite(states)) or not np.all(np.isfinite(controls)):
+            raise ValueError("initial guess must contain only finite values")
+        if not np.isfinite(self.sample_time) or self.sample_time <= 0.0:
+            raise ValueError("sample_time must be finite and positive")
+        object.__setattr__(self, "states", states)
+        object.__setattr__(self, "controls", controls)
+
+    @property
+    def horizon(self) -> int:
+        return len(self.controls)
 
 
-def _prepare_path(path) -> tuple[np.ndarray, np.ndarray]:
+def _validate_path(path) -> np.ndarray:
     points = np.asarray(path, dtype=float)
     if points.ndim != 2 or points.shape[1] not in (3, 4):
-        raise ValueError("path must have shape (M, 3) or (M, 4)")
+        raise ValueError("path must have rows [x, y, yaw] or [x, y, yaw, direction]")
     if len(points) < 2 or not np.all(np.isfinite(points)):
         raise ValueError("path must contain at least two finite poses")
-
     if points.shape[1] == 3:
         points = np.column_stack((points, np.ones(len(points))))
-    elif np.any(~np.isin(points[:, 3], (-1.0, 1.0))):
-        raise ValueError("path direction must be either -1 or +1")
-
-    # Repeated poses can mark a direction change. Keep the later row so its
-    # direction becomes the outgoing direction at that pose.
-    cleaned = [points[0].copy()]
-    for point in points[1:]:
-        if np.linalg.norm(point[:2] - cleaned[-1][:2]) <= 1e-9:
-            cleaned[-1] = point.copy()
-        else:
-            cleaned.append(point.copy())
-    points = np.asarray(cleaned)
-    if len(points) < 2:
+    if np.any(~np.isin(points[:, 3], (-1.0, 1.0))):
+        raise ValueError("path direction must be +1 or -1")
+    if np.all(np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1) <= 1e-9):
         raise ValueError("path must contain at least two distinct positions")
+    points = points.copy()
+    points[:, IPHI] = np.unwrap(points[:, IPHI])
+    return points
+
+
+def build_initial_guess(
+    path,
+    *,
+    sample_time: float = 0.15,
+    params: VehicleParams | None = None,
+    start_speed: float = 0.0,
+    goal_speed: float = 0.0,
+) -> TrajectoryGuess:
+    """Infer velocity and input guesses from Hybrid A* poses."""
+    params = params or VehicleParams()
+    points = _validate_path(path)
+    if not np.isfinite(sample_time) or sample_time <= 0.0:
+        raise ValueError("sample_time must be finite and positive")
 
     segment_lengths = np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)
-    arc_length = np.concatenate(([0.0], np.cumsum(segment_lengths)))
-    points[:, 2] = np.unwrap(points[:, 2])
-    return points, arc_length
+    segment_speeds = points[:-1, 3] * segment_lengths / sample_time
+    states = np.zeros((len(points), NX))
+    states[:, :3] = points[:, :3]
+    states[:-1, IV] = segment_speeds
+    states[0, IV] = start_speed
+    states[-1, IV] = goal_speed
 
-
-def _project_progress(
-    position: np.ndarray,
-    points: np.ndarray,
-    arc_length: np.ndarray,
-    progress_index: int,
-    max_search_points: int,
-) -> float:
-    """Project onto a bounded forward path portion to avoid branch jumps."""
-    first = int(np.clip(progress_index, 0, len(points) - 2))
-    last = min(len(points) - 1, first + max_search_points)
-    best_distance = np.inf
-    best_progress = arc_length[first]
-
-    for index in range(first, last):
-        start = points[index, :2]
-        segment = points[index + 1, :2] - start
-        length_squared = float(segment @ segment)
-        fraction = np.clip(
-            float((position - start) @ segment) / length_squared, 0.0, 1.0
-        )
-        projection = start + fraction * segment
-        distance = float((position - projection) @ (position - projection))
-        if distance < best_distance:
-            best_distance = distance
-            best_progress = arc_length[index] + fraction * np.sqrt(length_squared)
-    return best_progress
-
-
-def _path_value(points: np.ndarray, arc_length: np.ndarray, progress: float):
-    x = np.interp(progress, arc_length, points[:, 0])
-    y = np.interp(progress, arc_length, points[:, 1])
-    yaw = np.interp(progress, arc_length, points[:, 2])
-    index = min(
-        np.searchsorted(arc_length, progress, side="right") - 1, len(points) - 1
+    controls = np.zeros((len(points) - 1, NU))
+    yaw_change = np.diff(states[:, IPHI])
+    denominator = np.where(
+        np.abs(segment_speeds) > 1e-6,
+        segment_speeds * sample_time,
+        np.copysign(1e-6, segment_speeds + 1e-12),
     )
-    direction = points[max(index, 0), 3]
-    return x, y, yaw, direction
-
-
-def build_reference(
-    state,
-    path,
-    horizon: int,
-    dt: float,
-    *,
-    progress_index: int = 0,
-    target_speed: float = 0.4,
-    max_deceleration: float = 0.8,
-    max_lateral_acceleration: float = 0.5,
-    max_search_points: int = 40,
-    goal_position_tolerance: float = 0.05,
-    goal_speed_tolerance: float = 0.03,
-    direction_change_position_tolerance: float = 0.04,
-) -> ReferenceTrajectory:
-    """Resample a path into ``[X, Y, yaw, signed speed]`` states.
-
-    Sampling advances along path arc length. The speed reference slows for
-    curvature, direction changes, and the final goal. One horizon sample is
-    placed at every crossed direction change to request a stop before reversing.
-    """
-    current = np.asarray(state, dtype=float)
-    if current.shape != (NX,) or not np.all(np.isfinite(current)):
-        raise ValueError(f"state must be a finite vector with shape ({NX},)")
-    if not isinstance(horizon, (int, np.integer)) or horizon < 1:
-        raise ValueError("horizon must be a positive integer")
-    positive_values = (dt, target_speed, max_deceleration, max_lateral_acceleration)
-    if any(not np.isfinite(value) or value <= 0.0 for value in positive_values):
-        raise ValueError("dt, speeds, and acceleration limits must be positive")
-    if max_search_points < 1:
-        raise ValueError("max_search_points must be positive")
-
-    points, arc_length = _prepare_path(path)
-    points[:, 2] += 2.0 * np.pi * np.round(
-        (current[IPHI] - points[0, 2]) / (2.0 * np.pi)
+    controls[:, IDELTA] = np.arctan(params.wheelbase * yaw_change / denominator)
+    controls[:, IDELTA] = np.clip(
+        controls[:, IDELTA], -params.max_steering, params.max_steering
     )
-    progress = _project_progress(
-        current[[IX, IY]], points, arc_length, progress_index, max_search_points
-    )
+    controls[:, IA] = np.diff(states[:, IV]) / sample_time
+    controls[:, IA] = np.clip(controls[:, IA], -params.max_accel, params.max_accel)
+    return TrajectoryGuess(states, controls, float(sample_time))
 
-    direction_changes = np.flatnonzero(points[1:, 3] != points[:-1, 3]) + 1
-    horizon_limit = arc_length[-1]
-    locked_change_index = None
-    upcoming_changes = direction_changes[direction_changes > progress_index]
-    if upcoming_changes.size:
-        change_index = int(upcoming_changes[0])
-        change_progress = arc_length[change_index]
-        distance_to_change = np.linalg.norm(
-            current[[IX, IY]] - points[change_index, :2]
-        )
-        switch_ready = (
-            distance_to_change <= direction_change_position_tolerance
-            and abs(current[IV]) <= goal_speed_tolerance
-        )
-        if switch_ready:
-            progress = max(progress, change_progress)
-        else:
-            # Do not expose the next gear segment to the optimizer early. It
-            # must first reach and stop at the current segment's terminal pose.
-            progress = min(progress, change_progress)
-            horizon_limit = change_progress
-            locked_change_index = change_index
 
-    stop_positions = np.append(arc_length[direction_changes], arc_length[-1])
-    yaw_gradient = np.gradient(points[:, 2], arc_length)
-    nominal_step = target_speed * dt
-    reference = np.empty((horizon + 1, NX), dtype=float)
-    sample_progress = progress
-
-    for step_index in range(horizon + 1):
-        x, y, yaw, direction = _path_value(points, arc_length, sample_progress)
-        future_stops = stop_positions[stop_positions >= sample_progress - 1e-9]
-        distance_to_stop = np.min(future_stops - sample_progress)
-        stopping_speed = np.sqrt(
-            max(0.0, 2.0 * max_deceleration * distance_to_stop)
-        )
-        curvature = abs(np.interp(sample_progress, arc_length, yaw_gradient))
-        curve_speed = np.sqrt(max_lateral_acceleration / max(curvature, 1e-9))
-        speed = min(target_speed, stopping_speed, curve_speed)
-        reference[step_index] = (x, y, yaw, direction * speed)
-
-        if step_index == horizon or sample_progress >= arc_length[-1]:
-            continue
-        next_progress = min(
-            sample_progress + nominal_step, arc_length[-1], horizon_limit
-        )
-        crossed_stops = stop_positions[
-            (stop_positions > sample_progress + 1e-9)
-            & (stop_positions < next_progress - 1e-9)
-        ]
-        if crossed_stops.size:
-            next_progress = crossed_stops[0]
-        sample_progress = next_progress
-
-    if locked_change_index is not None and progress >= horizon_limit - 1e-9:
-        new_progress_index = locked_change_index - 1
-    else:
-        new_progress_index = int(
-            np.clip(
-                np.searchsorted(arc_length, progress, side="right") - 1,
-                0,
-                len(points) - 2,
-            )
-        )
-    goal_distance = np.linalg.norm(current[[IX, IY]] - points[-1, :2])
-    goal_reached = (
-        goal_distance <= goal_position_tolerance
-        and abs(current[IV]) <= goal_speed_tolerance
-    )
-    return ReferenceTrajectory(reference, new_progress_index, goal_reached)
+build_reference = build_initial_guess

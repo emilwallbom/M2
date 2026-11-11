@@ -12,3 +12,5 @@
     objective_acceleration_rate_weight: 0.1
     solver_max_iterations: 500
     solver_max_cpu_time_sec: 10.0
+    # Initial values of the OBCA dual variables: optimal_separation | legacy
+    dual_init: optimal_separation

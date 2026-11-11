@@ -64,9 +64,9 @@ class LowLevelController(Node):
         self.previous_error: float = 0.0
         self.previous_u: float = 0.0
         self.ti: float = 1.0
-        self.max_left_steering_angle: float = math.radians(25.0)
-        self.max_right_steering_angle: float = math.radians(35.0)
-        self.steering_offset: float = math.radians(5.0)
+        self.positive_steering_gain: float = math.radians(18.79)
+        self.negative_steering_gain: float = math.radians(30.20)
+        self.steering_offset: float = math.radians(4.67)
 
     def control_callback(self) -> None:
         """Control the vehicle based on the current state."""
@@ -96,16 +96,13 @@ class LowLevelController(Node):
         self.previous_u = u
         self.previous_error = error
 
-        if self.reference_steering >= 0:
-            # Left steering
-            u_steering = (
-                self.reference_steering - self.steering_offset
-            ) / self.max_left_steering_angle
-        else:
-            # Right steering
-            u_steering = (
-                self.reference_steering + self.steering_offset
-            ) / self.max_right_steering_angle
+        angle_from_offset = self.reference_steering - self.steering_offset
+        gain = (
+            self.positive_steering_gain
+            if angle_from_offset >= 0.0
+            else self.negative_steering_gain
+        )
+        u_steering = angle_from_offset / gain
 
         self.publish_control(u, max(-1.0, min(1.0, u_steering)))
 

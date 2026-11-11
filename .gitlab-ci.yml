@@ -1,0 +1,22 @@
+image: osrf/ros:jazzy-desktop
+
+stages:
+  - build
+
+build:
+  stage: build
+
+  variables:
+    # Limit parallel compilation inside each CMake package.
+    CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends python3-colcon-common-extensions python3-rosdep
+    - rosdep update --rosdistro jazzy
+    - rosdep install --from-paths src --ignore-src --skip-keys qualisys_cpp_sdk -r -y
+
+  script:
+    - source /opt/ros/jazzy/setup.bash
+    - colcon build --symlink-install --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release
+    - source install/setup.bash

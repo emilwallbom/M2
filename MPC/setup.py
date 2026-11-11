@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     maintainer="emilwallbom",
     maintainer_email="emil.wallbom02@gmail.com",
-    description="MPC development scaffold for the motion planning project.",
+    description="Hybrid A* warm start and OBCA trajectory optimization.",
     license="TODO",
     entry_points={
         "console_scripts": [

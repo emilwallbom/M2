@@ -30,6 +30,7 @@ returned trajectory is intended for the other group's low-level controller.
 
 | File | Responsibility |
 | --- | --- |
+| `mpc_controller/hybrid_astar.py` | Forward/reverse geometric warm-start search |
 | `mpc_controller/model.py` | Rear-axle bicycle dynamics and vehicle rectangle |
 | `mpc_controller/reference.py` | Hybrid A* path to `TrajectoryGuess` conversion |
 | `mpc_controller/costs.py` | Equation (20) time/input/input-rate objective |
@@ -37,6 +38,7 @@ returned trajectory is intended for the other group's low-level controller.
 | `mpc_controller/obstacles.py` | Convex obstacle geometry and clearance checks |
 | `mpc_controller/controller.py` | CasADi/IPOPT problem with equation (15) OBCA |
 | `mpc_controller/demo.py` | One-shot hardware-free solve and diagnostic plot |
+| `mpc_controller/ros_node.py` | Goal-driven A* -> OBCA ROS pipeline |
 
 ## Python interface
 
@@ -83,10 +85,35 @@ Run the tests with:
 PYTHONPATH=MPC python -m pytest MPC/test -q
 ```
 
-## ROS integration boundary
+## ROS pipeline
 
-`ros_node.py` remains a non-publishing interface scaffold. It must eventually
-receive a complete Hybrid A* path and obstacle polytopes, run this optimizer,
-and publish the optimized state/input/time sequence to the low-level group.
-Mapping physical steering and acceleration to CasCAR actuator effort belongs to
-that low-level controller, not this optimizer.
+Build and start the planner in the project's ROS 2 Jazzy environment:
+
+```bash
+colcon build --symlink-install --packages-up-to mpc_controller
+source install/setup.bash
+ros2 launch mpc_controller mpc.launch.py agent_name:=panther
+```
+
+The node waits for odometry and a goal. On each new goal it runs Hybrid A*,
+uses the resulting forward/reverse path to initialize IPOPT, runs OBCA once,
+and publishes the complete result.
+
+| Direction | Relative topic | Message |
+| --- | --- | --- |
+| Subscribe | `odom` | `nav_msgs/msg/Odometry` |
+| Subscribe | `goal_pose` | `geometry_msgs/msg/PoseStamped` |
+| Publish | `warm_start_path` | `nav_msgs/msg/Path` |
+| Publish | `optimized_path` | `nav_msgs/msg/Path` |
+| Publish | `optimized_trajectory` | `cascar_interfaces/msg/OptimizedTrajectory` |
+
+`OptimizedTrajectory` contains the common optimized sample time, all poses and
+velocities, and the steering/acceleration values for each interval. This is the
+interface intended for the low-level controller. Physical actuator conversion
+remains the low-level group's responsibility.
+
+`config/mpc.yaml` supplies one shared obstacle list as repeated lower-left
+`[x, y, width, height]` values. Hybrid A* uses inflated versions of these
+rectangles for its coarse search and OBCA uses their exact convex half-space
+representations. The default list is empty and must be populated from the
+actual map before obstacle-aware operation.

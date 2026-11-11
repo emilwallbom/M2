@@ -3,7 +3,7 @@
 <package format="3">
   <name>cascar_interfaces</name>
   <version>0.0.0</version>
-  <description>Custom actuator command and simulator reset interfaces for Cascar.</description>
+  <description>Custom actuator, trajectory, and simulator reset interfaces for Cascar.</description>
   <maintainer email="theodor.westny@liu.se">west</maintainer>
   <license>Apache-2.0</license>
 

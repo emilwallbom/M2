@@ -65,15 +65,39 @@ def build_initial_guess(
     params: VehicleParams | None = None,
     start_speed: float = 0.0,
     goal_speed: float = 0.0,
+    minimum_point_spacing: float = 0.04,
 ) -> TrajectoryGuess:
     """Infer velocity and input guesses from Hybrid A* poses."""
     params = params or VehicleParams()
     points = _validate_path(path)
     if not np.isfinite(sample_time) or sample_time <= 0.0:
         raise ValueError("sample_time must be finite and positive")
+    if not np.isfinite(minimum_point_spacing) or minimum_point_spacing < 0.0:
+        raise ValueError("minimum_point_spacing must be finite and nonnegative")
+
+    # Hybrid A* returns dense integration samples. Keep direction switches and
+    # thin nearby samples so the NLP horizon remains computationally practical.
+    if minimum_point_spacing > 0.0 and len(points) > 2:
+        retained = [0]
+        for index in range(1, len(points) - 1):
+            changes_direction = (
+                points[index, 3] != points[index - 1, 3]
+                or points[index, 3] != points[index + 1, 3]
+            )
+            far_enough = (
+                np.linalg.norm(points[index, :2] - points[retained[-1], :2])
+                >= minimum_point_spacing
+            )
+            if changes_direction or far_enough:
+                retained.append(index)
+        retained.append(len(points) - 1)
+        points = points[np.unique(retained)]
 
     segment_lengths = np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)
     segment_speeds = points[:-1, 3] * segment_lengths / sample_time
+    segment_speeds = np.clip(
+        segment_speeds, params.min_speed, params.max_speed
+    )
     states = np.zeros((len(points), NX))
     states[:, :3] = points[:, :3]
     states[:-1, IV] = segment_speeds

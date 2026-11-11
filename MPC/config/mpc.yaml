@@ -1,7 +1,11 @@
 /**:
   ros__parameters:
-    # Values for the one-shot OBCA trajectory optimizer. Parameter wiring into
-    # ros_node.py remains integration work.
+    planning_rate_hz: 2.0
+    initial_sample_time_sec: 0.15
+    warm_start_spacing_m: 0.04
+    goal_speed_mps: 0.0
+
+    # One-shot OBCA trajectory optimizer.
     minimum_sample_time_sec: 0.05
     maximum_sample_time_sec: 0.35
     minimum_clearance_m: 0.05
@@ -12,3 +16,19 @@
     objective_acceleration_rate_weight: 0.1
     solver_max_iterations: 500
     solver_max_cpu_time_sec: 10.0
+
+    # Hybrid A* motion primitives and discretized search state.
+    astar_steering_samples: 9
+    astar_speed_mps: 0.35
+    astar_edge_length_m: 0.25
+    astar_integration_dt_sec: 0.05
+    astar_xy_resolution_m: 0.08
+    astar_heading_resolution_rad: 0.1745329252
+    astar_goal_position_tolerance_m: 0.12
+    astar_goal_heading_tolerance_rad: 0.1745329252
+    astar_max_expansions: 50000
+
+    # [x_min, x_max, y_min, y_max]. Obstacles are repeated lower-left
+    # [x, y, width, height] entries. Both planners use this same geometry.
+    map_bounds: [-5.0, 5.0, -5.0, 5.0]
+    obstacles: []

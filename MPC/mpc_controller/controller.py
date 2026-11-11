@@ -15,7 +15,15 @@ import numpy as np
 
 from .constraints import build_constraints
 from .costs import ObjectiveWeights, trajectory_objective
-from .model import NU, NX, VehicleParams, footprint_halfspaces, rotation, step, translation
+from .model import (
+    NU,
+    NX,
+    VehicleParams,
+    footprint_halfspaces,
+    rotation,
+    step,
+    translation,
+)
 from .obstacles import ConvexPolytope
 from .reference import TrajectoryGuess
 

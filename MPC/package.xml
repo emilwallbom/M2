@@ -2,11 +2,12 @@
 <package format="3">
   <name>mpc_controller</name>
   <version>0.0.0</version>
-  <description>MPC development scaffold for the motion planning project.</description>
+  <description>Hybrid A* warm start and OBCA trajectory optimization.</description>
   <maintainer email="emil.wallbom02@gmail.com">emilwallbom</maintainer>
   <license>TODO: choose a license for the project contributions</license>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>cascar_interfaces</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>

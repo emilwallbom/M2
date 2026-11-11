@@ -8,6 +8,7 @@ states while minimizing equation (20) of Zhang et al.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from time import perf_counter
 
 import casadi as ca
@@ -15,6 +16,7 @@ import numpy as np
 
 from .constraints import build_constraints
 from .costs import ObjectiveWeights, trajectory_objective
+from .dual_warmstart import compute_dual_warmstart
 from .model import (
     NU,
     NX,
@@ -27,6 +29,11 @@ from .model import (
 from .obstacles import ConvexPolytope
 from .reference import TrajectoryGuess
 
+logger = logging.getLogger(__name__)
+
+# Allowed values of OptimizerConfig.dual_init.
+DUAL_INIT_METHODS = ("optimal_separation", "legacy")
+
 
 @dataclass(frozen=True)
 class OptimizerConfig:
@@ -38,8 +45,19 @@ class OptimizerConfig:
     solver_max_iterations: int = 500
     solver_max_cpu_time: float = 10.0
     solver_tolerance: float = 1e-5
+    # How lambda and mu get their initial values for IPOPT:
+    #   "optimal_separation": solve a small convex problem per (step, obstacle)
+    #                         for the best separating line of the guess
+    #                         (dual_warmstart.py). Default.
+    #   "legacy":             the original heuristic (_legacy_dual_initial_guess).
+    # Only the initial values change; the optimization problem is the same.
+    dual_init: str = "optimal_separation"
 
     def __post_init__(self):
+        if self.dual_init not in DUAL_INIT_METHODS:
+            raise ValueError(
+                f"dual_init must be one of {DUAL_INIT_METHODS}, got {self.dual_init!r}"
+            )
         if not (0.0 < self.minimum_sample_time < self.maximum_sample_time):
             raise ValueError("sample-time bounds must satisfy 0 < min < max")
         if not np.isfinite(self.minimum_clearance) or self.minimum_clearance < 0.0:
@@ -96,6 +114,34 @@ class TrajectoryOptimizer:
         self.obstacles = tuple(obstacles)
 
     def _dual_initial_guess(self, states: np.ndarray):
+        """Initial lambda/mu for the given state guess; method set by dual_init."""
+        # I read the knob here, the single place where the dual guess is made.
+        if self.config.dual_init == "legacy":
+            return self._legacy_dual_initial_guess(states)
+
+        G, g = footprint_halfspaces(self.params)
+        # The collision constraints use t = translation(state), the footprint
+        # CENTRE (the state itself is the rear axle), so I use the same here.
+        centers = np.array([translation(state, self.params) for state in states])
+        lambdas, mus, _, collides = compute_dual_warmstart(
+            centers[:, 0], centers[:, 1], states[:, 2], self.obstacles, G, g
+        )
+        if any(mask.any() for mask in collides):
+            # Where the guess already touches an obstacle, optimal separation
+            # has no usable answer (lambda, mu ~ 0), so I fall back to the
+            # legacy values for exactly those (k, m).
+            legacy_lambdas, legacy_mus = self._legacy_dual_initial_guess(states)
+            for m, mask in enumerate(collides):
+                for k in np.flatnonzero(mask):
+                    logger.warning(
+                        "initial guess touches obstacle %d at step %d; "
+                        "using legacy dual initialization there", m, k,
+                    )
+                    lambdas[m][k] = legacy_lambdas[m][k]
+                    mus[m][k] = legacy_mus[m][k]
+        return tuple(lambdas), tuple(mus)
+
+    def _legacy_dual_initial_guess(self, states: np.ndarray):
         G, g = footprint_halfspaces(self.params)
         lambda_guesses = []
         mu_guesses = []

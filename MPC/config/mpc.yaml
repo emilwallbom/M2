@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    # Node timer rate; prediction step and horizon will be defined with the model.
+    control_rate_hz: 20.0

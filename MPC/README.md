@@ -1,15 +1,16 @@
 # MPC
 
-Python ROS 2 package `mpc_controller`. This is a development scaffold: the
-optimization and vehicle model are deliberately unimplemented. The node can
-receive messages but publishes no actuator commands.
+Python ROS 2 package `mpc_controller`. The vehicle model, reference preparation,
+tracking cost, and ordinary vehicle constraints are implemented independently
+of ROS. The nonlinear optimizer and command output are still under development,
+so the node receives messages but publishes no actuator commands.
 
 | File | Work to implement |
 | --- | --- |
-| `mpc_controller/model.py` | State/input definitions and discrete vehicle dynamics |
-| `mpc_controller/reference.py` | Path sampling and reference trajectory |
-| `mpc_controller/costs.py` | Tracking, input and terminal costs |
-| `mpc_controller/constraints.py` | Vehicle, actuator and environment limits |
+| `mpc_controller/model.py` | Rear-axle bicycle model and vehicle geometry |
+| `mpc_controller/reference.py` | Forward/reverse path sampling and speed reference |
+| `mpc_controller/costs.py` | Tracking, input, input-rate and terminal costs |
+| `mpc_controller/constraints.py` | Speed, steering, acceleration and steering-rate limits |
 | `mpc_controller/controller.py` | Solver setup, optimization and solve status |
 | `mpc_controller/ros_node.py` | ROS input conversion, control loop and command output |
 | `config/mpc.yaml` | ROS parameters (currently only the timer rate) |
@@ -18,6 +19,12 @@ receive messages but publishes no actuator commands.
 Keep the numerical control components independent of ROS so they can later be
 tested using recorded data or standalone simulations. Choose a solver and add
 its dependencies once the formulation is agreed.
+
+The numeric Hybrid A* contract is an array with rows
+`[x_m, y_m, yaw_rad, direction]`, where direction is `+1` forward or `-1`
+reverse. `build_reference` produces `(N+1) x 4` reference states
+`[X, Y, yaw, signed_speed]`, explicitly stopping at direction changes and the
+goal. Optimizer states and controls use row-major shapes `(N+1, 4)` and `(N, 2)`.
 
 ## Build and launch
 

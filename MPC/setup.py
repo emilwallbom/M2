@@ -13,7 +13,7 @@ setup(
         ("share/mpc_controller/launch", glob("launch/*.launch.py")),
         ("share/mpc_controller/config", glob("config/*.yaml")),
     ],
-    install_requires=["setuptools"],
+    install_requires=["setuptools", "numpy", "PyYAML"],
     zip_safe=True,
     maintainer="emilwallbom",
     maintainer_email="emil.wallbom02@gmail.com",

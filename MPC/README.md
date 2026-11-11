@@ -117,3 +117,24 @@ remains the low-level group's responsibility.
 rectangles for its coarse search and OBCA uses their exact convex half-space
 representations. The default list is empty and must be populated from the
 actual map before obstacle-aware operation.
+
+## Full simulated chain
+
+Build the workspace and launch the repeatable straight-line scenario:
+
+```bash
+colcon build --symlink-install --packages-up-to mpc_controller
+source install/setup.bash
+ros2 launch mpc_controller full_chain.launch.py agent_name:=panther
+```
+
+This launch explicitly selects the simulator and disables Qualisys. After
+odometry starts, the scenario publishes a goal 1.5 m ahead. Hybrid A* creates
+the warm start, OBCA publishes `optimized_trajectory`, and the low-level node
+time-samples its velocity and steering arrays into `actuator_command`. All
+topics share the `/panther` namespace. Useful checks in another terminal are:
+
+```bash
+ros2 topic echo /panther/optimized_trajectory --once
+ros2 topic echo /panther/actuator_command
+```

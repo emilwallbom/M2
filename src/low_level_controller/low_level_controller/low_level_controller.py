@@ -6,10 +6,13 @@ from datetime import datetime
 from pathlib import Path
 
 import rclpy
-from cascar_interfaces.msg import ActuatorCommand
+from cascar_interfaces.msg import ActuatorCommand, OptimizedTrajectory
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
+from .trajectory_sampling import sample_reference
 
 
 class LowLevelController(Node):
@@ -41,11 +44,22 @@ class LowLevelController(Node):
             "actuator_command",
             1,
         )
+        trajectory_qos = QoSProfile(depth=1)
+        trajectory_qos.reliability = ReliabilityPolicy.RELIABLE
+        trajectory_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.trajectory_subscription = self.create_subscription(
+            OptimizedTrajectory,
+            "optimized_trajectory",
+            self.trajectory_callback,
+            trajectory_qos,
+        )
 
         self.dt: float = 0.02
         self.control_timer = self.create_timer(self.dt, self.control_callback)
-        self.reference_velocity: float = 0.5
-        self.reference_steering: float = math.radians(30.0)
+        self.trajectory: OptimizedTrajectory | None = None
+        self.trajectory_start_ns: int = 0
+        self.reference_velocity: float = 0.0
+        self.reference_steering: float = 0.0
         self.k: float = 1.0
         self.previous_error: float = 0.0
         self.previous_u: float = 0.0
@@ -56,8 +70,18 @@ class LowLevelController(Node):
 
     def control_callback(self) -> None:
         """Control the vehicle based on the current state."""
-        if self.velocity is None:
+        if self.velocity is None or self.trajectory is None:
             return
+
+        elapsed = (
+            self.get_clock().now().nanoseconds - self.trajectory_start_ns
+        ) * 1e-9
+        self.reference_velocity, self.reference_steering, _ = sample_reference(
+            self.trajectory.velocities,
+            self.trajectory.steering_angles,
+            self.trajectory.sample_time,
+            elapsed,
+        )
 
         error: float = self.reference_velocity - self.velocity
         delta_u = self.k * (error - self.previous_error + self.dt / self.ti * error)
@@ -83,7 +107,32 @@ class LowLevelController(Node):
                 self.reference_steering + self.steering_offset
             ) / self.max_right_steering_angle
 
-        self.publish_control(u, u_steering)
+        self.publish_control(u, max(-1.0, min(1.0, u_steering)))
+
+    def trajectory_callback(self, msg: OptimizedTrajectory) -> None:
+        """Accept a complete trajectory produced by the OBCA planner."""
+        controls = len(msg.poses) - 1
+        values = [
+            msg.sample_time,
+            *msg.velocities,
+            *msg.steering_angles,
+            *msg.accelerations,
+        ]
+        if (
+            len(msg.poses) < 2
+            or len(msg.velocities) != len(msg.poses)
+            or len(msg.steering_angles) != controls
+            or len(msg.accelerations) != controls
+            or not all(math.isfinite(value) for value in values)
+            or msg.sample_time <= 0.0
+        ):
+            self.get_logger().error("Rejected malformed optimized trajectory")
+            return
+        self.trajectory = msg
+        self.trajectory_start_ns = self.get_clock().now().nanoseconds
+        self.get_logger().info(
+            f"Following optimized trajectory with {len(msg.poses)} states"
+        )
 
     def odom_callback(self, msg: Odometry) -> None:
         """Store odometry and signed forward velocity in m/s."""

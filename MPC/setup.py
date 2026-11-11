@@ -23,6 +23,7 @@ setup(
         "console_scripts": [
             "mpc_node = mpc_controller.ros_node:main",
             "mpc_demo = mpc_controller.demo:main",
+            "scenario_goal = mpc_controller.scenario_goal:main",
         ],
     },
 )

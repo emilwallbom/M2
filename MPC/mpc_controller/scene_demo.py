@@ -1,8 +1,9 @@
 """Hybrid A* + OBCA on parking/driving scenes, plotted together.
 
 Scenes (metres): ``bay`` (reverse into a 1.0 m bay), ``parallel`` (parallel
-park), ``slalom`` (forward only), ``uturn`` (turn around in a corridor) and
-``corner`` (tight L-shaped corridor).
+park), ``slalom`` (forward only), ``uturn`` (turn around in a corridor),
+``corner`` (tight L-shaped corridor), and ``paper_tjunction`` (the paper's
+T-junction maneuver at Cascar scale).
 Run from MPC/:  PYTHONPATH=. python -m mpc_controller.scene_demo --scene parallel
 Plots go to MPC/test/ (scene_demo.png for ``bay``, scene_<name>.png otherwise).
 """
@@ -38,6 +39,7 @@ class Scene:
     rectangles: tuple  # Rectangle(lower-left x, y, width, height); both planners use these
     start: Pose
     goal: Pose  # rear-axle pose
+    collision_radius: float = 0.3
 
 
 SCENES = {
@@ -75,6 +77,16 @@ SCENES = {
          Rectangle(4.2, -1.5, 0.3, 1.8)),
         Pose(-0.5, 0.0, 0.0), Pose(5.5, 0.0, 0.0),
     ),
+    # Cascar-scale recreation of the paper's constrained T-junction maneuver.
+    # The tight upper chamber forces a forward/reverse turn before exiting left.
+    "paper_tjunction": Scene(
+        "paper_tjunction", (-3.0, 3.0, 0.0, 1.7),
+        (Rectangle(-3.0, 0.0, 2.675, 1.0),
+         Rectangle(0.325, 0.0, 2.675, 1.0),
+         Rectangle(-3.0, 1.5, 6.0, 0.2)),
+        Pose(0.0, 0.35, np.pi / 2), Pose(-1.5, 1.25, np.pi),
+        0.14,
+    ),
 }
 
 
@@ -82,13 +94,15 @@ def default_output(name: str) -> Path:
     return TEST_DIR / ("scene_demo.png" if name == "bay" else f"scene_{name}.png")
 
 
-def run_scene(scene: Scene = SCENES["bay"], *, collision_radius=0.3, sample_time=0.15,
+def run_scene(scene: Scene = SCENES["bay"], *, collision_radius=None, sample_time=0.15,
               dual_init="optimal_separation", bound_map=True):
     params = VehicleParams()
     b = scene.map_bounds
     astar_config = HybridAStarConfig(
         x_min=b[0], x_max=b[1], y_min=b[2], y_max=b[3],
-        collision_radius=collision_radius, max_expansions=100_000,
+        collision_radius=(scene.collision_radius if collision_radius is None
+                          else collision_radius),
+        max_expansions=100_000,
     )
     started = perf_counter()
     path = HybridAStar(astar_config, scene.rectangles).plan(scene.start, scene.goal)
@@ -112,10 +126,18 @@ def run_scene(scene: Scene = SCENES["bay"], *, collision_radius=0.3, sample_time
     clearance = (
         trajectory_clearance(result.states, obstacles, params) if result.success else None
     )
-    return dict(scene=scene, path=path, guess=guess, result=result, obstacles=obstacles,
-                params=params, clearance=clearance,
-                guess_clearance=trajectory_clearance(guess.states, obstacles, params),
-                astar_time=astar_time, min_clearance=optimizer.config.minimum_clearance)
+    return {
+        "scene": scene,
+        "path": path,
+        "guess": guess,
+        "result": result,
+        "obstacles": obstacles,
+        "params": params,
+        "clearance": clearance,
+        "guess_clearance": trajectory_clearance(guess.states, obstacles, params),
+        "astar_time": astar_time,
+        "min_clearance": optimizer.config.minimum_clearance,
+    }
 
 
 def plot_scene(scene_run, output: Path, *, show=False):

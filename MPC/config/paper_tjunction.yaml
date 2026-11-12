@@ -1,0 +1,36 @@
+/**:
+  ros__parameters:
+    planning_rate_hz: 2.0
+    initial_sample_time_sec: 0.15
+    warm_start_spacing_m: 0.04
+    goal_speed_mps: 0.0
+
+    minimum_sample_time_sec: 0.05
+    maximum_sample_time_sec: 0.35
+    minimum_clearance_m: 0.05
+    objective_time_weight: 1.0
+    objective_steering_weight: 0.01
+    objective_acceleration_weight: 0.5
+    objective_steering_rate_weight: 0.1
+    objective_acceleration_rate_weight: 0.1
+    solver_max_iterations: 500
+    solver_max_cpu_time_sec: 15.0
+
+    astar_steering_samples: 9
+    astar_speed_mps: 0.35
+    astar_edge_length_m: 0.20
+    astar_integration_dt_sec: 0.05
+    astar_xy_resolution_m: 0.06
+    astar_heading_resolution_rad: 0.1745329252
+    astar_goal_position_tolerance_m: 0.12
+    astar_goal_heading_tolerance_rad: 0.1745329252
+    astar_max_expansions: 150000
+    # Coarse warm-start radius; OBCA uses the exact rectangle and 5 cm margin.
+    astar_collision_radius_m: 0.14
+
+    # Cascar-scale paper T-junction. The 0.5 m upper chamber forces the
+    # characteristic forward/reverse maneuver before the left exit.
+    map_bounds: [-3.0, 3.0, 0.0, 1.7]
+    obstacles: [-3.0, 0.0, 2.675, 1.0,
+                 0.325, 0.0, 2.675, 1.0,
+                -3.0, 1.5, 6.0, 0.2]

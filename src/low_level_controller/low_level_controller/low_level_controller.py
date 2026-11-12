@@ -63,8 +63,12 @@ class LowLevelController(Node):
         self.reference_steering: float = 0.0
         self.k: float = 1.0
         self.previous_error: float = 0.0
+        # Store only the PI correction; feedforward is added once per cycle.
         self.previous_u: float = 0.0
         self.ti: float = 1.0
+        # Steady-speed estimates from the forward/reverse 0.5 m/s tests.
+        self.forward_velocity_gain: float = 1.03
+        self.reverse_velocity_gain: float = 0.63
 
         self.max_throttle_output = max(
             0.0,
@@ -93,14 +97,15 @@ class LowLevelController(Node):
         error: float = self.reference_velocity - self.velocity
         delta_u = self.k * (error - self.previous_error + self.dt / self.ti * error)
 
-        if self.previous_u + delta_u > self.max_throttle_output:
-            u = self.max_throttle_output
-        elif self.previous_u + delta_u < -self.max_throttle_output:
-            u = -self.max_throttle_output
-        else:
-            u = self.previous_u + delta_u
+        u_ff = self.velocity_feedforward(self.reference_velocity)
+        u_pi = self.previous_u + delta_u
+        u = max(
+            -self.max_throttle_output,
+            min(self.max_throttle_output, u_ff + u_pi),
+        )
 
-        self.previous_u = u
+        # Track the saturated output to prevent PI windup.
+        self.previous_u = u - u_ff
         self.previous_error = error
 
         angle_from_offset = self.reference_steering - self.steering_offset
@@ -112,6 +117,14 @@ class LowLevelController(Node):
         u_steering = angle_from_offset / gain
 
         self.publish_control(u, max(-1.0, min(1.0, u_steering)))
+
+    def velocity_feedforward(self, velocity: float) -> float:
+        gain = (
+            self.forward_velocity_gain
+            if velocity >= 0.0
+            else self.reverse_velocity_gain
+        )
+        return max(-1.0, min(1.0, gain * velocity))
 
     def trajectory_callback(self, msg: OptimizedTrajectory) -> None:
         """Accept a complete trajectory produced by the OBCA planner."""

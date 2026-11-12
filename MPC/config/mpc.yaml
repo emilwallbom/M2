@@ -27,6 +27,8 @@
     astar_goal_position_tolerance_m: 0.12
     astar_goal_heading_tolerance_rad: 0.1745329252
     astar_max_expansions: 50000
+    # Negative selects the conservative automatic circumscribed radius.
+    astar_collision_radius_m: -1.0
 
     # [x_min, x_max, y_min, y_max]. Obstacles are repeated lower-left
     # [x, y, width, height] entries. Both planners use this same geometry.

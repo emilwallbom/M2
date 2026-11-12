@@ -69,10 +69,18 @@ class MPCNode(Node):
             raise ValueError("map_bounds must be [x_min, x_max, y_min, y_max]")
 
         minimum_clearance = float(self.get_parameter("minimum_clearance_m").value)
-        collision_radius = math.hypot(
+        automatic_collision_radius = math.hypot(
             max(self.params.length - self.params.rear_overhang, self.params.rear_overhang),
             self.params.width / 2.0,
         ) + minimum_clearance
+        configured_collision_radius = float(
+            self.get_parameter("astar_collision_radius_m").value
+        )
+        collision_radius = (
+            configured_collision_radius
+            if configured_collision_radius >= 0.0
+            else automatic_collision_radius
+        )
         astar_config = HybridAStarConfig(
             wheelbase=self.params.wheelbase,
             max_steering=self.params.max_steering,
@@ -92,6 +100,10 @@ class MPCNode(Node):
             collision_radius=collision_radius,
         )
         self.astar = HybridAStar(astar_config, rectangles)
+        self.get_logger().info(
+            f"Hybrid A* configured with {len(rectangles)} obstacles and "
+            f"collision radius {collision_radius:.3f} m"
+        )
 
         optimizer_config = OptimizerConfig(
             minimum_sample_time=float(self.get_parameter("minimum_sample_time_sec").value),
@@ -183,6 +195,7 @@ class MPCNode(Node):
             "astar_goal_position_tolerance_m": 0.12,
             "astar_goal_heading_tolerance_rad": float(np.deg2rad(10.0)),
             "astar_max_expansions": 50_000,
+            "astar_collision_radius_m": -1.0,
             "map_bounds": [-5.0, 5.0, -5.0, 5.0],
         }
         for name, default in defaults.items():
@@ -236,7 +249,13 @@ class MPCNode(Node):
         )
         astar_path = self.astar.plan(start, goal)
         if astar_path is None:
-            raise RuntimeError("Hybrid A* found no path within its expansion limit")
+            raise RuntimeError(
+                "Hybrid A* found no path: "
+                f"start=({start.x:.2f}, {start.y:.2f}, {start.heading:.2f}), "
+                f"goal=({goal.x:.2f}, {goal.y:.2f}, {goal.heading:.2f}), "
+                f"bounds={self.optimizer.config.map_bounds}, "
+                f"collision_radius={self.astar.config.collision_radius:.3f}"
+            )
 
         guess = build_initial_guess(
             path_array(astar_path),

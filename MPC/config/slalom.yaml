@@ -25,6 +25,9 @@
     astar_goal_position_tolerance_m: 0.12
     astar_goal_heading_tolerance_rad: 0.1745329252
     astar_max_expansions: 100000
+    # Matches the successful scene_demo slalom. OBCA still checks the exact
+    # rectangular footprint with minimum_clearance_m.
+    astar_collision_radius_m: 0.3
 
     # Exact world geometry from scene_demo.py's slalom scenario.
     # Each obstacle is [lower-left x, lower-left y, width, height].

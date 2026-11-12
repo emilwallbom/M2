@@ -44,9 +44,6 @@ class ParkingMission(Node):
             )
 
     def _try_start(self) -> None:
-        if self.publisher.get_subscription_count() == 0:
-            self.get_logger().info("Waiting for the planner goal subscription")
-            return
         speed_limit = float(self.get_parameter("stationary_speed_mps").value)
         if abs(self.latest_odometry.twist.twist.linear.x) > speed_limit:
             self.get_logger().warning("Waiting for the vehicle to become stationary")

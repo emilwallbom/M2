@@ -10,6 +10,7 @@ from cascar_interfaces.msg import OptimizedTrajectory
 from geometry_msgs.msg import Pose as PoseMessage
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry, Path
+from rclpy.exceptions import ParameterUninitializedException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -58,7 +59,11 @@ class MPCNode(Node):
         super().__init__("mpc_controller")
         self._declare_parameters()
         self.params = VehicleParams()
-        rectangles = _parse_rectangles(self.get_parameter("obstacles").value)
+        try:
+            obstacle_values = self.get_parameter("obstacles").value
+        except ParameterUninitializedException:
+            obstacle_values = []
+        rectangles = _parse_rectangles(obstacle_values)
         map_bounds = list(self.get_parameter("map_bounds").value)
         if len(map_bounds) != 4:
             raise ValueError("map_bounds must be [x_min, x_max, y_min, y_max]")

@@ -150,8 +150,8 @@ ros2 launch mpc_controller hardware_parking.launch.py agent_name:=tiger
 
 The launcher starts vehicle state estimation with Qualisys, RViz, Hybrid A*/
 OBCA, the low-level controller, and a one-shot mission. It waits for odometry,
-the planner subscription, a stationary vehicle, and an eight-second startup
-delay. The default target is expressed in the vehicle's starting frame: 0.8 m
+a stationary vehicle, and an eight-second startup delay. The default target is
+expressed in the vehicle's starting frame: 0.8 m
 behind, 0.4 m left, with the same final heading. Hardware throttle effort is
 limited to 0.2 by default.
 

@@ -8,6 +8,7 @@ states while minimizing equation (20) of Zhang et al.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from time import perf_counter
 
 import casadi as ca
@@ -15,6 +16,7 @@ import numpy as np
 
 from .constraints import build_constraints
 from .costs import ObjectiveWeights, trajectory_objective
+from .dual_warmstart import compute_dual_warmstart
 from .model import (
     NU,
     NX,
@@ -27,6 +29,11 @@ from .model import (
 from .obstacles import ConvexPolytope
 from .reference import TrajectoryGuess
 
+logger = logging.getLogger(__name__)
+
+# Allowed values of OptimizerConfig.dual_init.
+DUAL_INIT_METHODS = ("optimal_separation", "legacy")
+
 
 @dataclass(frozen=True)
 class OptimizerConfig:
@@ -38,8 +45,32 @@ class OptimizerConfig:
     solver_max_iterations: int = 500
     solver_max_cpu_time: float = 10.0
     solver_tolerance: float = 1e-5
+    # How lambda and mu get their initial values for IPOPT:
+    #   "optimal_separation": solve a small convex problem per (step, obstacle)
+    #                         for the best separating line of the guess
+    #                         (dual_warmstart.py). Default.
+    #   "legacy":             the original heuristic (_legacy_dual_initial_guess).
+    # Only the initial values change; the optimization problem is the same.
+    dual_init: str = "optimal_separation"
+    # (x_min, x_max, y_min, y_max): keeps all four corners of the vehicle
+    # footprint inside this box at every step. None = unbounded (the previous
+    # behaviour). Hybrid A* is confined to the map, so use the same box here.
+    map_bounds: tuple[float, float, float, float] | None = None
 
     def __post_init__(self):
+        if self.map_bounds is not None:
+            bounds = tuple(float(v) for v in self.map_bounds)
+            if (
+                len(bounds) != 4
+                or not np.all(np.isfinite(bounds))
+                or not (bounds[0] < bounds[1] and bounds[2] < bounds[3])
+            ):
+                raise ValueError("map_bounds must be (x_min, x_max, y_min, y_max)")
+            object.__setattr__(self, "map_bounds", bounds)
+        if self.dual_init not in DUAL_INIT_METHODS:
+            raise ValueError(
+                f"dual_init must be one of {DUAL_INIT_METHODS}, got {self.dual_init!r}"
+            )
         if not (0.0 < self.minimum_sample_time < self.maximum_sample_time):
             raise ValueError("sample-time bounds must satisfy 0 < min < max")
         if not np.isfinite(self.minimum_clearance) or self.minimum_clearance < 0.0:
@@ -96,6 +127,34 @@ class TrajectoryOptimizer:
         self.obstacles = tuple(obstacles)
 
     def _dual_initial_guess(self, states: np.ndarray):
+        """Initial lambda/mu for the given state guess; method set by dual_init."""
+        # I read the knob here, the single place where the dual guess is made.
+        if self.config.dual_init == "legacy":
+            return self._legacy_dual_initial_guess(states)
+
+        G, g = footprint_halfspaces(self.params)
+        # The collision constraints use t = translation(state), the footprint
+        # CENTRE (the state itself is the rear axle), so I use the same here.
+        centers = np.array([translation(state, self.params) for state in states])
+        lambdas, mus, _, collides = compute_dual_warmstart(
+            centers[:, 0], centers[:, 1], states[:, 2], self.obstacles, G, g
+        )
+        if any(mask.any() for mask in collides):
+            # Where the guess already touches an obstacle, optimal separation
+            # has no usable answer (lambda, mu ~ 0), so I fall back to the
+            # legacy values for exactly those (k, m).
+            legacy_lambdas, legacy_mus = self._legacy_dual_initial_guess(states)
+            for m, mask in enumerate(collides):
+                for k in np.flatnonzero(mask):
+                    logger.warning(
+                        "initial guess touches obstacle %d at step %d; "
+                        "using legacy dual initialization there", m, k,
+                    )
+                    lambdas[m][k] = legacy_lambdas[m][k]
+                    mus[m][k] = legacy_mus[m][k]
+        return tuple(lambdas), tuple(mus)
+
+    def _legacy_dual_initial_guess(self, states: np.ndarray):
         G, g = footprint_halfspaces(self.params)
         lambda_guesses = []
         mu_guesses = []
@@ -202,6 +261,25 @@ class TrajectoryOptimizer:
 
         G_array, g_array = footprint_halfspaces(self.params)
         G, g = ca.DM(G_array), ca.DM(g_array)
+        if self.config.map_bounds is not None:
+            # Footprint corners in the world frame are t + R c for the four
+            # corners c = (+-half_length, +-half_width); keeping every corner
+            # inside the box keeps the whole (convex) car inside it.
+            x_min, x_max, y_min, y_max = self.config.map_bounds
+            corners = [
+                ca.DM([sx * g_array[0], sy * g_array[2]])
+                for sx in (1.0, -1.0)
+                for sy in (1.0, -1.0)
+            ]
+            lower = ca.DM([x_min, y_min] * len(corners))
+            upper = ca.DM([x_max, y_max] * len(corners))
+            for index in range(horizon + 1):
+                state = states[index, :].T
+                centre = translation(state, self.params, xp=ca)
+                rotated = rotation(state, xp=ca)
+                world = ca.vertcat(*[centre + rotated @ corner for corner in corners])
+                opti.subject_to(opti.bounded(lower, world, upper))
+
         obstacle_lambdas = []
         vehicle_mus = []
         for obstacle in self.obstacles:

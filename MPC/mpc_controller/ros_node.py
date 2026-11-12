@@ -97,6 +97,7 @@ class MPCNode(Node):
             minimum_sample_time=float(self.get_parameter("minimum_sample_time_sec").value),
             maximum_sample_time=float(self.get_parameter("maximum_sample_time_sec").value),
             minimum_clearance=minimum_clearance,
+            map_bounds=tuple(float(v) for v in map_bounds),
             solver_max_iterations=int(self.get_parameter("solver_max_iterations").value),
             solver_max_cpu_time=float(self.get_parameter("solver_max_cpu_time_sec").value),
         )

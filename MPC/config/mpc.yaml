@@ -32,3 +32,6 @@
     # [x, y, width, height] entries. Both planners use this same geometry.
     map_bounds: [-5.0, 5.0, -5.0, 5.0]
     obstacles: []
+
+    # Initial values of the OBCA dual variables: optimal_separation | legacy
+    dual_init: optimal_separation

@@ -4,7 +4,7 @@ from mpc_controller.constraints import build_constraints
 from mpc_controller.controller import OptimizerConfig, TrajectoryOptimizer
 from mpc_controller.costs import trajectory_objective
 from mpc_controller.model import step
-from mpc_controller.reference import build_initial_guess
+from mpc_controller.reference import TrajectoryGuess, build_initial_guess
 
 
 def test_optimizer_fixes_endpoints_and_respects_dynamics_and_limits():
@@ -55,3 +55,37 @@ def test_warm_start_is_not_a_tracked_reference():
     assert result.success, result.status
     change = np.max(np.linalg.norm(result.states[:, :2] - guess.states[:, :2], axis=1))
     assert change > 0.02
+
+
+def test_map_bounds_keep_the_whole_footprint_inside():
+    import pytest
+    from mpc_controller.controller import OptimizerConfig
+    from mpc_controller.model import VehicleParams, rotation, translation
+
+    params = VehicleParams()
+    n = 12
+    states = np.zeros((n + 1, 4))
+    states[:, 0] = np.linspace(0.0, 1.0, n + 1)
+    states[1:-1, 3] = 0.3
+    guess = TrajectoryGuess(states=states, controls=np.zeros((n, 2)), sample_time=0.2)
+    bounds = (-0.5, 2.0, -0.4, 0.6)
+    result = TrajectoryOptimizer(OptimizerConfig(map_bounds=bounds), params).solve(
+        guess.states[0], guess.states[-1], guess
+    )
+    assert result.success, result.status
+    half = np.array([params.length / 2, params.width / 2])
+    for state in result.states:
+        corners = np.array([
+            translation(state, params) + rotation(state) @ (half * [sx, sy])
+            for sx in (1, -1) for sy in (1, -1)
+        ])
+        assert corners[:, 0].min() >= bounds[0] - 1e-6
+        assert corners[:, 0].max() <= bounds[1] + 1e-6
+        assert corners[:, 1].min() >= bounds[2] - 1e-6
+        assert corners[:, 1].max() <= bounds[3] + 1e-6
+
+    # Bounds that cut through the goal footprint must make the problem infeasible.
+    too_tight = TrajectoryOptimizer(OptimizerConfig(map_bounds=(-0.5, 1.1, -0.4, 0.6)), params)
+    assert not too_tight.solve(guess.states[0], guess.states[-1], guess).success
+    with pytest.raises(ValueError):
+        OptimizerConfig(map_bounds=(1.0, 0.0, 0.0, 1.0))

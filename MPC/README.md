@@ -164,3 +164,25 @@ ros2 launch mpc_controller hardware_parking.launch.py \
 ```
 
 Use `qualisys_used:=false` only when running without the Qualisys system.
+
+### Physical slalom from `scene_demo.py`
+
+The plotted three-wall slalom has a dedicated hardware launcher:
+
+```bash
+ros2 launch mpc_controller hardware_slalom.launch.py agent_name:=tiger
+```
+
+Place the rear axle at `(-0.5, 0.0)` with heading `0` in the Qualisys odometry
+frame. The goal is `(5.5, 0.0, 0)`. Place axis-aligned barriers using these
+lower-left positions and sizes in metres:
+
+| Barrier | Lower-left `(x, y)` | Size `(width, height)` |
+| --- | --- | --- |
+| 1 | `(1.0, -1.5)` | `(0.3, 1.8)` |
+| 2 | `(2.6, -0.3)` | `(0.3, 1.8)` |
+| 3 | `(4.2, -1.5)` | `(0.3, 1.8)` |
+
+The same values from `config/slalom.yaml` initialize Hybrid A* and OBCA. The
+launcher sends the goal after eight seconds and limits normalized throttle to
+`0.2` by default.

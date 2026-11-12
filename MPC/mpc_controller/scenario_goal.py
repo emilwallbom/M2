@@ -33,9 +33,6 @@ class ScenarioGoal(Node):
         self.get_logger().info(f"Odometry received; publishing test goal in {delay:.1f}s")
 
     def _publish_goal(self) -> None:
-        if self.publisher.get_subscription_count() == 0:
-            self.get_logger().info("Waiting for the planner goal subscription")
-            return
         yaw = float(self.get_parameter("goal_yaw").value)
         message = PoseStamped()
         message.header.stamp = self.get_clock().now().to_msg()

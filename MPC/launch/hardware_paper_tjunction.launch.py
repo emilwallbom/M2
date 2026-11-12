@@ -59,9 +59,9 @@ def generate_launch_description() -> LaunchDescription:
             name="paper_tjunction_goal",
             namespace=agent_name,
             parameters=[{
-                "goal_x": -1.5,
-                "goal_y": 1.25,
-                "goal_yaw": 3.141592653589793,
+                "goal_x": 0.0,
+                "goal_y": 0.35,
+                "goal_yaw": 1.5707963267948966,
                 "delay_sec": ParameterValue(
                     LaunchConfiguration("start_delay_sec"), value_type=float
                 ),

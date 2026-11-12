@@ -28,9 +28,9 @@
     # Coarse warm-start radius; OBCA uses the exact rectangle and 5 cm margin.
     astar_collision_radius_m: 0.14
 
-    # Cascar-scale paper T-junction. The 0.5 m upper chamber forces the
-    # characteristic forward/reverse maneuver before the left exit.
-    map_bounds: [-3.0, 3.0, 0.0, 1.7]
+    # Cascar-scale paper T-junction. The car starts on the left road and parks
+    # inside the vertical stem using the characteristic multi-point maneuver.
+    map_bounds: [-3.0, 3.0, 0.0, 1.8]
     obstacles: [-3.0, 0.0, 2.675, 1.0,
                  0.325, 0.0, 2.675, 1.0,
-                -3.0, 1.5, 6.0, 0.2]
+                -3.0, 1.6, 6.0, 0.2]

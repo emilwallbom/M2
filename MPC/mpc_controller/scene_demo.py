@@ -78,13 +78,13 @@ SCENES = {
         Pose(-0.5, 0.0, 0.0), Pose(5.5, 0.0, 0.0),
     ),
     # Cascar-scale recreation of the paper's constrained T-junction maneuver.
-    # The tight upper chamber forces a forward/reverse turn before exiting left.
+    # Start on the left road and finish parked inside the vertical stem.
     "paper_tjunction": Scene(
-        "paper_tjunction", (-3.0, 3.0, 0.0, 1.7),
+        "paper_tjunction", (-3.0, 3.0, 0.0, 1.8),
         (Rectangle(-3.0, 0.0, 2.675, 1.0),
          Rectangle(0.325, 0.0, 2.675, 1.0),
-         Rectangle(-3.0, 1.5, 6.0, 0.2)),
-        Pose(0.0, 0.35, np.pi / 2), Pose(-1.5, 1.25, np.pi),
+         Rectangle(-3.0, 1.6, 6.0, 0.2)),
+        Pose(-1.5, 1.3, 0.0), Pose(0.0, 0.35, np.pi / 2),
         0.14,
     ),
 }

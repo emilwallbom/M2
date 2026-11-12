@@ -198,16 +198,17 @@ PYTHONPATH=MPC python -m mpc_controller.scene_demo --scene paper_tjunction
 ```
 
 The result is written to `MPC/test/scene_paper_tjunction.png`. For hardware,
-place the rear axle at `(0.0, 0.35)` facing `+Y` and run:
+place the rear axle at `(-1.5, 1.30)` facing `+X` and run:
 
 ```bash
 ros2 launch mpc_controller hardware_paper_tjunction.launch.py agent_name:=tiger
 ```
 
-The goal rear-axle pose is `(-1.5, 1.25, pi)`. The obstacle footprints are:
+The goal rear-axle pose is `(0.0, 0.35, pi/2)` inside the vertical stem. The
+obstacle footprints are:
 
 | Obstacle | Lower-left `(x, y)` | Size `(width, height)` |
 | --- | --- | --- |
 | Lower left | `(-3.0, 0.0)` | `(2.675, 1.0)` |
 | Lower right | `(0.325, 0.0)` | `(2.675, 1.0)` |
-| Top wall | `(-3.0, 1.5)` | `(6.0, 0.2)` |
+| Top wall | `(-3.0, 1.6)` | `(6.0, 0.2)` |

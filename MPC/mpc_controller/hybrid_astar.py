@@ -47,8 +47,8 @@ class HybridAStarConfig:
     xy_resolution: float = 0.08
     heading_resolution: float = np.deg2rad(10.0)
     goal_position_tolerance: float = 0.7
-    goal_heading_tolerance: float = np.deg2rad(20.0)
-    reverse_cost_factor: float = 1.0
+    goal_heading_tolerance: float = np.deg2rad(25.0)
+    reverse_cost_factor: float = 1.2
     direction_switch_cost: float = 0.0
     max_expansions: int = 50_000
     x_min: float = -5.0

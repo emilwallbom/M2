@@ -14,6 +14,7 @@ from rclpy.exceptions import ParameterUninitializedException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from visualization_msgs.msg import Marker, MarkerArray
 
 from .controller import OptimizerConfig, TrajectoryOptimizer
 from .costs import ObjectiveWeights
@@ -172,6 +173,10 @@ class MPCNode(Node):
         output_qos = QoSProfile(depth=1)
         output_qos.reliability = ReliabilityPolicy.RELIABLE
         output_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        self.obstacle_publisher = self.create_publisher(
+            MarkerArray, "obstacle_markers", output_qos
+        )
+        self.obstacle_frame = None
         self.warm_start_publisher = self.create_publisher(
             Path, "warm_start_path", output_qos
         )
@@ -232,6 +237,39 @@ class MPCNode(Node):
 
     def _on_odometry(self, message: Odometry):
         self.latest_odometry = message
+        if message.header.frame_id and message.header.frame_id != self.obstacle_frame:
+            self._publish_obstacles(message.header.frame_id)
+
+    def _publish_obstacles(self, frame_id: str) -> None:
+        """Show the configured obstacle footprints in the planning frame."""
+        markers = MarkerArray()
+        clear = Marker()
+        clear.header.frame_id = frame_id
+        clear.action = Marker.DELETEALL
+        markers.markers.append(clear)
+        stamp = self.get_clock().now().to_msg()
+        for index, rectangle in enumerate(self.astar.obstacles):
+            marker = Marker()
+            marker.header.frame_id = frame_id
+            marker.header.stamp = stamp
+            marker.ns = "planning_obstacles"
+            marker.id = index
+            marker.type = Marker.CUBE
+            marker.action = Marker.ADD
+            marker.pose.position.x = float(rectangle.x + rectangle.width / 2.0)
+            marker.pose.position.y = float(rectangle.y + rectangle.height / 2.0)
+            marker.pose.position.z = 0.1
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = float(rectangle.width)
+            marker.scale.y = float(rectangle.height)
+            marker.scale.z = 0.2
+            marker.color.r = 1.0
+            marker.color.g = 0.2
+            marker.color.b = 0.2
+            marker.color.a = 0.7
+            markers.markers.append(marker)
+        self.obstacle_publisher.publish(markers)
+        self.obstacle_frame = frame_id
 
     def _on_goal(self, message: PoseStamped):
         self.pending_goal = message

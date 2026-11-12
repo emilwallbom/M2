@@ -69,10 +69,16 @@ class MPCNode(Node):
             raise ValueError("map_bounds must be [x_min, x_max, y_min, y_max]")
 
         minimum_clearance = float(self.get_parameter("minimum_clearance_m").value)
-        automatic_collision_radius = math.hypot(
-            max(self.params.length - self.params.rear_overhang, self.params.rear_overhang),
-            self.params.width / 2.0,
-        ) + minimum_clearance
+        automatic_collision_radius = (
+            math.hypot(
+                max(
+                    self.params.length - self.params.rear_overhang,
+                    self.params.rear_overhang,
+                ),
+                self.params.width / 2.0,
+            )
+            + minimum_clearance
+        )
         configured_collision_radius = float(
             self.get_parameter("astar_collision_radius_m").value
         )
@@ -87,11 +93,19 @@ class MPCNode(Node):
             steering_samples=int(self.get_parameter("astar_steering_samples").value),
             speed=float(self.get_parameter("astar_speed_mps").value),
             edge_length=float(self.get_parameter("astar_edge_length_m").value),
-            integration_dt=float(self.get_parameter("astar_integration_dt_sec").value),
+            integration_dt=float(
+                self.get_parameter("astar_integration_dt_sec").value
+            ),
             xy_resolution=float(self.get_parameter("astar_xy_resolution_m").value),
-            heading_resolution=float(self.get_parameter("astar_heading_resolution_rad").value),
-            goal_position_tolerance=float(self.get_parameter("astar_goal_position_tolerance_m").value),
-            goal_heading_tolerance=float(self.get_parameter("astar_goal_heading_tolerance_rad").value),
+            heading_resolution=float(
+                self.get_parameter("astar_heading_resolution_rad").value
+            ),
+            goal_position_tolerance=float(
+                self.get_parameter("astar_goal_position_tolerance_m").value
+            ),
+            goal_heading_tolerance=float(
+                self.get_parameter("astar_goal_heading_tolerance_rad").value
+            ),
             max_expansions=int(self.get_parameter("astar_max_expansions").value),
             x_min=float(map_bounds[0]),
             x_max=float(map_bounds[1]),
@@ -106,19 +120,33 @@ class MPCNode(Node):
         )
 
         optimizer_config = OptimizerConfig(
-            minimum_sample_time=float(self.get_parameter("minimum_sample_time_sec").value),
-            maximum_sample_time=float(self.get_parameter("maximum_sample_time_sec").value),
+            minimum_sample_time=float(
+                self.get_parameter("minimum_sample_time_sec").value
+            ),
+            maximum_sample_time=float(
+                self.get_parameter("maximum_sample_time_sec").value
+            ),
             minimum_clearance=minimum_clearance,
             map_bounds=tuple(float(v) for v in map_bounds),
-            solver_max_iterations=int(self.get_parameter("solver_max_iterations").value),
-            solver_max_cpu_time=float(self.get_parameter("solver_max_cpu_time_sec").value),
+            solver_max_iterations=int(
+                self.get_parameter("solver_max_iterations").value
+            ),
+            solver_max_cpu_time=float(
+                self.get_parameter("solver_max_cpu_time_sec").value
+            ),
         )
         weights = ObjectiveWeights(
             time=float(self.get_parameter("objective_time_weight").value),
             steering=float(self.get_parameter("objective_steering_weight").value),
-            acceleration=float(self.get_parameter("objective_acceleration_weight").value),
-            steering_rate=float(self.get_parameter("objective_steering_rate_weight").value),
-            acceleration_rate=float(self.get_parameter("objective_acceleration_rate_weight").value),
+            acceleration=float(
+                self.get_parameter("objective_acceleration_weight").value
+            ),
+            steering_rate=float(
+                self.get_parameter("objective_steering_rate_weight").value
+            ),
+            acceleration_rate=float(
+                self.get_parameter("objective_acceleration_rate_weight").value
+            ),
         )
         obca_obstacles = tuple(
             axis_aligned_rectangle(
@@ -210,7 +238,11 @@ class MPCNode(Node):
         self.get_logger().info("New goal received; scheduling Hybrid A* and OBCA")
 
     def _plan_if_ready(self):
-        if self.planning or self.latest_odometry is None or self.pending_goal is None:
+        if (
+            self.planning
+            or self.latest_odometry is None
+            or self.pending_goal is None
+        ):
             return
         self.planning = True
         goal_message = self.pending_goal
@@ -232,11 +264,13 @@ class MPCNode(Node):
         frame_id = goal_frame or odom_frame or "map"
         start_pose = odometry.pose.pose
         goal_pose = goal_message.pose
-        start_speed = float(np.clip(
-            odometry.twist.twist.linear.x,
-            self.params.min_speed,
-            self.params.max_speed,
-        ))
+        start_speed = float(
+            np.clip(
+                odometry.twist.twist.linear.x,
+                self.params.min_speed,
+                self.params.max_speed,
+            )
+        )
         start = Pose(
             start_pose.position.x,
             start_pose.position.y,
@@ -265,16 +299,16 @@ class MPCNode(Node):
             goal_speed=self.goal_speed,
             minimum_point_spacing=self.warm_start_spacing,
         )
+        stamp = self.get_clock().now().to_msg()
+        self.warm_start_publisher.publish(
+            self._path_message(guess.states, frame_id, stamp)
+        )
         start_state = np.array([start.x, start.y, start.heading, start_speed])
         goal_state = np.array([goal.x, goal.y, goal.heading, self.goal_speed])
         result = self.optimizer.solve(start_state, goal_state, guess)
         if not result.success:
             raise RuntimeError(f"OBCA returned {result.status}")
 
-        stamp = self.get_clock().now().to_msg()
-        self.warm_start_publisher.publish(
-            self._path_message(guess.states, frame_id, stamp)
-        )
         self.optimized_path_publisher.publish(
             self._path_message(result.states, frame_id, stamp)
         )

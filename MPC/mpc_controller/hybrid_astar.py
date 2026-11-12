@@ -42,14 +42,14 @@ class HybridAStarConfig:
     max_steering: float = 0.35
     steering_samples: int = 9
     speed: float = 0.35
-    edge_length: float = 0.25
+    edge_length: float = 0.5
     integration_dt: float = 0.05
     xy_resolution: float = 0.08
     heading_resolution: float = np.deg2rad(10.0)
-    goal_position_tolerance: float = 0.12
-    goal_heading_tolerance: float = np.deg2rad(10.0)
-    reverse_cost_factor: float = 1.2
-    direction_switch_cost: float = 0.1
+    goal_position_tolerance: float = 0.7
+    goal_heading_tolerance: float = np.deg2rad(20.0)
+    reverse_cost_factor: float = 1.0
+    direction_switch_cost: float = 0.0
     max_expansions: int = 50_000
     x_min: float = -5.0
     x_max: float = 5.0
@@ -70,7 +70,9 @@ class HybridAStarConfig:
             self.goal_heading_tolerance,
         )
         if any(not np.isfinite(value) or value <= 0.0 for value in positive):
-            raise ValueError("Hybrid A* scale parameters must be finite and positive")
+            raise ValueError(
+                "Hybrid A* scale parameters must be finite and positive"
+            )
         if self.steering_samples < 3 or self.steering_samples % 2 == 0:
             raise ValueError("steering_samples must be an odd integer >= 3")
         if not (self.x_min < self.x_max and self.y_min < self.y_max):
@@ -107,7 +109,9 @@ class HybridAStar:
         for obstacle in self.obstacles:
             if (
                 obstacle.x - radius <= pose.x <= obstacle.x + obstacle.width + radius
-                and obstacle.y - radius <= pose.y <= obstacle.y + obstacle.height + radius
+                and obstacle.y - radius
+                <= pose.y
+                <= obstacle.y + obstacle.height + radius
             ):
                 return False
         return True
@@ -140,8 +144,7 @@ class HybridAStar:
                 current.x + velocity * np.cos(current.heading) * dt,
                 current.y + velocity * np.sin(current.heading) * dt,
                 wrap_angle(
-                    current.heading
-                    + velocity * np.tan(steering) / c.wheelbase * dt
+                    current.heading + velocity * np.tan(steering) / c.wheelbase * dt
                 ),
                 direction,
             )
@@ -165,7 +168,9 @@ class HybridAStar:
         start = replace(start, heading=wrap_angle(start.heading), direction=1)
         start_key = self._key(start)
         counter = itertools.count()
-        frontier = [(self._heuristic(start, goal), next(counter), 0.0, start_key, start)]
+        frontier = [
+            (self._heuristic(start, goal), next(counter), 0.0, start_key, start)
+        ]
         best_cost = {start_key: 0.0}
         parent = {start_key: None}
         edge_paths: dict[tuple, list[Pose]] = {}
@@ -200,7 +205,7 @@ class HybridAStar:
                     heapq.heappush(
                         frontier,
                         (
-                            new_cost + self._heuristic(successor, goal),
+                            new_cost + 3 * self._heuristic(successor, goal),
                             next(counter),
                             new_cost,
                             successor_key,
